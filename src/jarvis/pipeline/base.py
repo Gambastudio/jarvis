@@ -1,7 +1,9 @@
 """Abstract base classes for pluggable pipeline components."""
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Callable
+from typing import Callable
 
 
 class STTEngine(ABC):
@@ -13,7 +15,7 @@ class STTEngine(ABC):
     """
 
     @abstractmethod
-    async def start(self, on_text: 'Callable[[str], None]') -> None:
+    async def start(self, on_text: Callable[[str], None]) -> None:
         """Start listening. Calls on_text(transcription) for each result."""
         ...
 
@@ -51,7 +53,7 @@ class WakeWordEngine(ABC):
     """Wake word detection engine interface."""
 
     @abstractmethod
-    async def start(self, callback: 'callable') -> None:
+    async def start(self, callback: Callable[[], None]) -> None:
         """Start listening for wake word. Calls callback when detected."""
         ...
 
