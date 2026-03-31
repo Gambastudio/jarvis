@@ -1,0 +1,68 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "jarvis-voice"
+version = "0.1.0-alpha"
+description = "Open Source Voice Agent Framework powered by Claude Agent SDK"
+readme = "README.md"
+license = "MIT"
+requires-python = ">= 3.10"
+authors = [
+    { name = "Andreas Zeisler", email = "andreas@gambastudio.dev" },
+]
+keywords = ["voice", "agent", "claude", "mcp", "ai", "assistant"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+
+dependencies = [
+    "claude-agent-sdk",
+    "typer>=0.9.0",
+    "pyyaml>=6.0",
+    "rich>=13.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+stt = ["RealtimeSTT"]
+tts-piper = ["piper-tts"]
+macos = ["rumps", "pyobjc-framework-Cocoa"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio",
+    "ruff>=0.4",
+]
+all = ["jarvis-voice[stt,tts-piper,macos,dev]"]
+
+[project.scripts]
+jarvis = "jarvis.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/GambaStudio/jarvis"
+Repository = "https://github.com/GambaStudio/jarvis"
+Issues = "https://github.com/GambaStudio/jarvis/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jarvis"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

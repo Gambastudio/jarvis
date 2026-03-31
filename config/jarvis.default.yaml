@@ -1,0 +1,45 @@
+# Jarvis Default Configuration
+# Copy to ~/.jarvis/jarvis.yaml or ./jarvis.yaml and customize.
+
+wake_word:
+  engine: whisper-wake
+  # variants: [jarvis, dschawis, ...]  # auto-populated for 'jarvis'
+
+stt:
+  engine: realtimestt
+  model: base
+  language: de
+  compute_type: int8
+  initial_prompt: Jarvis
+
+tts:
+  engine: macos-say
+  rate: 200
+
+vad:
+  sensitivity: 0.4
+  post_speech_silence: 0.8
+  min_recording_length: 0.2
+
+session:
+  wake_word: jarvis
+  stop_word: danke
+  exit_phrase: jarvis beenden
+  max_history: 16
+
+agent:
+  api_key_env: ANTHROPIC_API_KEY
+  model: claude-sonnet-4-6
+  max_turns: 20
+  max_budget_usd: 0.50
+  permission_mode: acceptEdits
+
+audio:
+  input_device: default
+  output_device: default
+  sample_rate: 16000
+
+logging:
+  level: INFO
+  file: ~/.jarvis/logs/jarvis.log
+  cost_tracking: true
