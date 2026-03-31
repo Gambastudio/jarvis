@@ -1,24 +1,35 @@
 """Abstract base classes for pluggable pipeline components."""
 
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Callable
 
 
 class STTEngine(ABC):
-    """Speech-to-Text engine interface."""
+    """Speech-to-Text engine interface.
+
+    Uses callback-based transcription: call start(on_text) and the engine
+    invokes on_text(transcription) for each recognized utterance.
+    Includes mute/unmute for feedback loop prevention during TTS.
+    """
 
     @abstractmethod
-    async def transcribe(self, audio_buffer: bytes) -> str:
-        """Transcribe audio buffer to text."""
+    async def start(self, on_text: 'Callable[[str], None]') -> None:
+        """Start listening. Calls on_text(transcription) for each result."""
         ...
 
     @abstractmethod
-    async def start_stream(self) -> None:
-        """Start continuous audio stream for real-time transcription."""
+    async def stop(self) -> None:
+        """Stop listening and release resources."""
         ...
 
     @abstractmethod
-    async def stop_stream(self) -> None:
-        """Stop the audio stream."""
+    def mute(self) -> None:
+        """Disable microphone input (for feedback loop prevention)."""
+        ...
+
+    @abstractmethod
+    def unmute(self) -> None:
+        """Re-enable microphone and clear buffered audio."""
         ...
 
 
