@@ -35,22 +35,37 @@ class JarvisAgent:
         self._client: ClaudeSDKClient | None = None
         self._session_id: str | None = None
 
+    # Base system prompt for voice interactions — always applied.
+    _VOICE_SYSTEM_PROMPT = (
+        "You are Jarvis, a voice assistant. "
+        "IMPORTANT: Your responses will be read aloud via text-to-speech. "
+        "Rules:\n"
+        "- Answer in plain spoken language — NO markdown, NO bullet points, "
+        "NO tables, NO code blocks, NO emojis.\n"
+        "- Keep answers SHORT: 1-3 sentences for simple questions, "
+        "max 5-6 sentences for complex ones.\n"
+        "- Never use special characters like *, #, |, >, `, or --- in your response.\n"
+        "- Respond in the same language the user spoke.\n"
+        "- Be direct and conversational, like a helpful colleague speaking out loud."
+    )
+
     def _build_options(self) -> ClaudeAgentOptions:
         """Build ClaudeAgentOptions from JarvisConfig."""
+        # Start with the voice system prompt; append user CLAUDE.md if present.
+        system_prompt = self._VOICE_SYSTEM_PROMPT
+        for candidate in [Path.home() / ".jarvis" / "CLAUDE.md"]:
+            if candidate.exists():
+                system_prompt += "\n\n" + candidate.read_text()
+                break
+
         opts = ClaudeAgentOptions(
             model=self.config.agent.model,
             max_turns=self.config.agent.max_turns,
             max_budget_usd=self.config.agent.max_budget_usd,
             permission_mode=self.config.agent.permission_mode,
             thinking=self.config.agent.thinking,
+            system_prompt=system_prompt,
         )
-
-        # System prompt from CLAUDE.md if it exists
-        claude_md = Path.cwd() / "CLAUDE.md"
-        if not claude_md.exists():
-            claude_md = Path.cwd() / ".jarvis" / "CLAUDE.md"
-        if claude_md.exists():
-            opts.system_prompt = claude_md.read_text()
 
         # MCP servers
         if self.config.mcp_servers:
@@ -61,9 +76,6 @@ class JarvisAgent:
             opts.allowed_tools = self.config.allowed_tools
         if self.config.disallowed_tools:
             opts.disallowed_tools = self.config.disallowed_tools
-
-        # Load project settings (CLAUDE.md, skills, etc.)
-        opts.setting_sources = ["project"]
 
         return opts
 
