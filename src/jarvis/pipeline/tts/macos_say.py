@@ -31,11 +31,14 @@ class MacOSSayEngine(TTSEngine):
             cmd.extend(["-v", self.voice])
         cmd.append(clean)
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+            # Run synchronously in a thread-pool executor — avoids asyncio
+            # subprocess issues when called from non-main-thread event loops.
+            loop = asyncio.get_event_loop()
+            await asyncio.wait_for(
+                loop.run_in_executor(None, lambda: subprocess.run(cmd, timeout=60)),
+                timeout=65,
             )
-            await asyncio.wait_for(proc.wait(), timeout=60)
-        except asyncio.TimeoutError:
+        except (asyncio.TimeoutError, subprocess.TimeoutExpired):
             log.warning("TTS timeout after 60s")
         except Exception as e:
             log.error(f"TTS error: {e}")

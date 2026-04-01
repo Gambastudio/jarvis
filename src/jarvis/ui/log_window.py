@@ -53,6 +53,7 @@ class LogWindow:
 
     def __init__(self) -> None:
         self._queue: queue.Queue[str] = queue.Queue()
+        self._buffer: list[str] = []   # stores last 200 msgs before window opens
         self._window = None
         self._text_view = None
         self._font = None
@@ -72,6 +73,10 @@ class LogWindow:
         if self._window is not None:
             self._window.makeKeyAndOrderFront_(None)
             return
+        # Replay buffered messages into queue before building the window
+        for msg in self._buffer:
+            self._queue.put(msg)
+        self._buffer.clear()
 
         from AppKit import (
             NSBackingStoreBuffered,
@@ -138,7 +143,13 @@ class LogWindow:
 
     def enqueue(self, text: str) -> None:
         """Thread-safe: add a log line to the display queue."""
-        self._queue.put(text)
+        if self._text_view is None:
+            # Window not open yet — keep last 200 messages in buffer
+            self._buffer.append(text)
+            if len(self._buffer) > 200:
+                self._buffer.pop(0)
+        else:
+            self._queue.put(text)
 
     def flush(self) -> None:
         """Drain queue into NSTextView. Must be called from Main Thread."""
