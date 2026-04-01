@@ -74,9 +74,31 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    /* 5. Build wchar_t argv for Py_Main: jarvis -S -m jarvis.ui.macos_app */
-    const char *py_args[] = { exe, "-S", "-m", "jarvis.ui.macos_app" };
-    int py_argc = 4;
+    /* 5. Build wchar_t argv for Py_Main.
+     *
+     * When macOS launches the app normally: argc == 1, no extra args.
+     *   → run: jarvis -S -m jarvis.ui.macos_app
+     *
+     * When Python's multiprocessing spawns a worker it calls us with extra
+     * args, e.g.:  jarvis -S -c "from multiprocessing.spawn import ..."
+     *   → pass those args through unchanged so the worker runs correctly
+     *     and does NOT start the full GUI app again.
+     */
+    const char **py_args;
+    int          py_argc;
+
+    const char *default_args[] = { exe, "-S", "-m", "jarvis.ui.macos_app" };
+
+    if (argc > 1) {
+        /* Forward original argv (replace argv[0] with resolved exe path). */
+        py_argc = argc;
+        py_args = (const char **)argv;
+        py_args[0] = exe;   /* use realpath so Python can find itself */
+    } else {
+        py_args = default_args;
+        py_argc = 4;
+    }
+
     wchar_t **py_argv = calloc(py_argc + 1, sizeof(wchar_t *));
     if (!py_argv) { perror("jarvis: calloc"); return 1; }
 

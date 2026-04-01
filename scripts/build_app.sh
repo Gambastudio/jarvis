@@ -57,6 +57,8 @@ cat > "$CONTENTS/Info.plist" << PLIST
     <true/>
     <key>NSMicrophoneUsageDescription</key>
     <string>Jarvis uses the microphone to listen for your voice commands.</string>
+    <key>LSMultipleInstancesProhibited</key>
+    <true/>
 </dict>
 </plist>
 PLIST
