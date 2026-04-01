@@ -21,6 +21,12 @@ def clean_for_speech(text: str, max_length: int = 800) -> str:
     text = re.sub(r"\*([^*]+)\*", r"\1", text)
     # Links
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    # Markdown tables (entire lines with |)
+    text = re.sub(r"^\|.*\|$", "", text, flags=re.MULTILINE)
+    # Table separator lines (---|---)
+    text = re.sub(r"^[-|: ]+$", "", text, flags=re.MULTILINE)
+    # Horizontal rules
+    text = re.sub(r"^---+$", "", text, flags=re.MULTILINE)
     # Bullet points
     text = re.sub(r"^[-*]\s+", "", text, flags=re.MULTILINE)
     # Multiple blank lines

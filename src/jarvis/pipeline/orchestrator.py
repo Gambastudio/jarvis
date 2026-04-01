@@ -13,6 +13,7 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from jarvis.config import JarvisConfig
+from jarvis.utils.text_cleaner import clean_for_speech
 from jarvis.pipeline.base import STTEngine, TTSEngine, WakeWordEngine
 
 if TYPE_CHECKING:
@@ -162,7 +163,7 @@ class VoicePipeline:
         self.state = PipelineState.PROCESSING
         response = asyncio.run(self.agent.ask(text))
         log.info(f"Jarvis: {response}")
-        asyncio.run(self._speak(response))
+        asyncio.run(self._speak(clean_for_speech(response)))
 
     async def _speak(self, text: str) -> None:
         """Feedback-safe speech output: mute → speak → unmute.
