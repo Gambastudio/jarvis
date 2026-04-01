@@ -36,6 +36,7 @@ class RealtimeSTTEngine(STTEngine):
             language=self._stt_config.language,
             initial_prompt=self._stt_config.initial_prompt,
             spinner=False,
+            no_log_file=True,
             silero_sensitivity=self._vad_config.sensitivity,
             post_speech_silence_duration=self._vad_config.post_speech_silence,
             min_length_of_recording=self._vad_config.min_recording_length,
