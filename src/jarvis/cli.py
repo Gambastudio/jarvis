@@ -43,126 +43,25 @@ def listen(
 
 
 async def _run_pipeline(cfg) -> None:
-    """Main voice pipeline loop."""
+    """Main voice pipeline — delegates to VoicePipeline orchestrator."""
     from jarvis.agent.core import JarvisAgent
+    from jarvis.pipeline.orchestrator import VoicePipeline
     from jarvis.pipeline.wake.whisper_wake import WhisperWakeEngine
     from jarvis.pipeline.tts.macos_say import MacOSSayEngine
-    from jarvis.pipeline.feedback_guard import FeedbackGuard
-    from jarvis.utils.logging import setup_logging
-
-    import logging
-    log = logging.getLogger("jarvis")
-
-    agent = JarvisAgent(cfg)
-    wake = WhisperWakeEngine(cfg.wake_word.variants)
-    tts = MacOSSayEngine(rate=cfg.tts.rate, voice=cfg.tts.voice)
-    guard = FeedbackGuard()
-
-    session_active = False
-
-    def process_text(text: str) -> None:
-        nonlocal session_active
-        text = text.strip()
-        if not text or len(text) < 2:
-            return
-
-        log.info(f'STT: "{text}"')
-
-        # Not in session — check for wake word
-        if not session_active:
-            cmd = wake.check_transcription(text)
-            if cmd is None:
-                return
-            session_active = True
-            log.info("SESSION STARTED")
-
-            if cmd:
-                response = asyncio.run(agent.ask(cmd))
-                log.info(f"Jarvis: {response}")
-                guard.mute()
-                asyncio.run(tts.speak(response))
-                guard.unmute()
-            else:
-                guard.mute()
-                asyncio.run(tts.speak("Ja?"))
-                guard.unmute()
-            return
-
-        # Check for stop word
-        t = text.lower().strip().rstrip(".!,")
-        if t in [cfg.session.stop_word, f"{cfg.session.stop_word}schoen", f"vielen {cfg.session.stop_word}"]:
-            session_active = False
-            asyncio.run(agent.reset_session())
-            log.info("SESSION ENDED")
-            guard.mute()
-            asyncio.run(tts.speak("Alles klar."))
-            guard.unmute()
-            return
-
-        # Check for exit phrase
-        if text.lower() in [cfg.session.exit_phrase, "programm beenden"]:
-            guard.mute()
-            asyncio.run(tts.speak("Bis spaeter!"))
-            guard.unmute()
-            log.info("PROGRAM EXIT")
-            raise SystemExit(0)
-
-        # Process command
-        response = asyncio.run(agent.ask(text))
-        log.info(f"Jarvis: {response}")
-        guard.mute()
-        asyncio.run(tts.speak(response))
-        guard.unmute()
-
-    # Main recorder loop with auto-recovery
-    log.info(f"Waiting for '{cfg.session.wake_word}'...")
 
     try:
-        from RealtimeSTT import AudioToTextRecorder
+        from jarvis.pipeline.stt.realtimestt import RealtimeSTTEngine
     except ImportError:
         console.print("[red]RealtimeSTT not installed.[/red] Run: pip install jarvis-voice[stt]")
         raise SystemExit(1)
 
-    while True:
-        recorder = None
-        try:
-            recorder = AudioToTextRecorder(
-                model=cfg.stt.model,
-                compute_type=cfg.stt.compute_type,
-                language=cfg.stt.language,
-                initial_prompt=cfg.stt.initial_prompt,
-                spinner=False,
-                silero_sensitivity=cfg.vad.sensitivity,
-                post_speech_silence_duration=cfg.vad.post_speech_silence,
-                min_length_of_recording=cfg.vad.min_recording_length,
-                min_gap_between_recordings=0.05,
-                on_transcription_start=lambda *a: None,
-            )
-            guard.set_recorder(recorder)
-            log.info("Recorder ready")
-            guard.mute()
-            asyncio.run(tts.speak("Jarvis online."))
-            guard.unmute()
+    stt = RealtimeSTTEngine(stt_config=cfg.stt, vad_config=cfg.vad)
+    tts = MacOSSayEngine(rate=cfg.tts.rate, voice=cfg.tts.voice)
+    wake = WhisperWakeEngine(cfg.wake_word.variants)
+    agent = JarvisAgent(cfg)
 
-            while True:
-                recorder.text(process_text)
-
-        except SystemExit:
-            break
-        except KeyboardInterrupt:
-            break
-        except Exception as e:
-            log.warning(f"Recorder error: {e} — restarting in 2s...")
-            import time
-            time.sleep(2)
-        finally:
-            if recorder:
-                try:
-                    recorder.stop()
-                except Exception:
-                    pass
-
-    await agent.close()
+    pipeline = VoicePipeline(stt=stt, tts=tts, wake=wake, agent=agent, config=cfg)
+    await pipeline.run()
 
 
 @app.command("query")
