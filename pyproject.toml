@@ -46,6 +46,7 @@ all = ["jarvis-voice[stt,tts-piper,macos,dev]"]
 
 [project.scripts]
 jarvis = "jarvis.cli:app"
+jarvis-app = "jarvis.ui.macos_app:main"
 
 [project.urls]
 Homepage = "https://github.com/GambaStudio/jarvis"
