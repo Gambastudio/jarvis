@@ -61,14 +61,19 @@ cat > "$CONTENTS/Info.plist" << PLIST
 </plist>
 PLIST
 
-# ── Shell launcher ─────────────────────────────────────────────────────────────
-cat > "$MACOS_DIR/jarvis" << 'LAUNCHER'
-#!/bin/bash
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-VENV="$DIR/../Resources/venv"
-exec "$VENV/bin/python3.12" -m jarvis.ui.macos_app "$@"
-LAUNCHER
-chmod +x "$MACOS_DIR/jarvis"
+# ── Remove enum34 (Python 2 backport, breaks PyObjC on Python 3.12) ───────────
+"$VENV/bin/pip" uninstall -y enum34 2>/dev/null || true
+
+# ── Install jarvis as regular package (editable .pth files are skipped by -S) ─
+"$VENV/bin/pip" install "$REPO_ROOT" --no-deps -q
+
+# ── Compiled C launcher ────────────────────────────────────────────────────────
+# A shell script launcher would show "Python" as the app identity in macOS.
+# The C launcher loads Python via dlopen — the process image stays as "jarvis"
+# so NSBundle, notifications, and the menu bar icon all show Jarvis.app.
+echo "▶ Compiling launcher..."
+clang -Wall -O2 -o "$MACOS_DIR/jarvis" "$REPO_ROOT/scripts/launcher.c"
+echo "   Done"
 
 # ── Icon ───────────────────────────────────────────────────────────────────────
 if [ -f "$REPO_ROOT/resources/AppIcon.icns" ]; then
