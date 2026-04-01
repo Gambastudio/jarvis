@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Callable
+from collections.abc import Callable
 
 from jarvis.config import STTConfig, VADConfig
 from jarvis.pipeline.base import STTEngine

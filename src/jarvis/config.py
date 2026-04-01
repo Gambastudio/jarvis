@@ -10,7 +10,6 @@ from typing import Any
 
 import yaml
 
-
 DEFAULT_CONFIG_DIR = Path.home() / ".jarvis"
 DEFAULT_CONFIG_FILE = DEFAULT_CONFIG_DIR / "jarvis.yaml"
 
@@ -18,13 +17,36 @@ DEFAULT_CONFIG_FILE = DEFAULT_CONFIG_DIR / "jarvis.yaml"
 @dataclass
 class WakeWordConfig:
     engine: str = "whisper-wake"
-    variants: list[str] = field(default_factory=lambda: [
-        "jarvis", "dschawis", "jervis", "jarwis", "schavis", "chavez",
-        "jogges", "jarves", "jarfis", "jarvice", "charvis", "tschawis",
-        "ja bis", "ja, bis", "job ist", "ciao bis", "ciao, bis", "javis",
-        "jarbis", "tschabis", "schawis", "dscharvis", "dschavis", "travis",
-        "bis monat",
-    ])
+    variants: list[str] = field(
+        default_factory=lambda: [
+            "jarvis",
+            "dschawis",
+            "jervis",
+            "jarwis",
+            "schavis",
+            "chavez",
+            "jogges",
+            "jarves",
+            "jarfis",
+            "jarvice",
+            "charvis",
+            "tschawis",
+            "ja bis",
+            "ja, bis",
+            "job ist",
+            "ciao bis",
+            "ciao, bis",
+            "javis",
+            "jarbis",
+            "tschabis",
+            "schawis",
+            "dscharvis",
+            "dschavis",
+            "travis",
+            "bis monat",
+        ]
+    )
+
 
 @dataclass
 class STTConfig:
@@ -34,6 +56,7 @@ class STTConfig:
     compute_type: str = "int8"
     initial_prompt: str = "Jarvis"
 
+
 @dataclass
 class TTSConfig:
     engine: str = "macos-say"
@@ -41,11 +64,13 @@ class TTSConfig:
     voice: str | None = None
     piper_voice: str = "de_DE-thorsten-high"
 
+
 @dataclass
 class VADConfig:
     sensitivity: float = 0.4
     post_speech_silence: float = 0.8
     min_recording_length: float = 0.2
+
 
 @dataclass
 class SessionConfig:
@@ -53,6 +78,7 @@ class SessionConfig:
     stop_word: str = "danke"
     exit_phrase: str = "jarvis beenden"
     max_history: int = 16
+
 
 @dataclass
 class AgentConfig:
@@ -63,17 +89,20 @@ class AgentConfig:
     permission_mode: str = "acceptEdits"
     thinking: dict[str, Any] = field(default_factory=lambda: {"type": "adaptive"})
 
+
 @dataclass
 class AudioConfig:
     input_device: str = "default"
     output_device: str = "default"
     sample_rate: int = 16000
 
+
 @dataclass
 class LoggingConfig:
     level: str = "INFO"
     file: str = "~/.jarvis/logs/jarvis.log"
     cost_tracking: bool = True
+
 
 @dataclass
 class JarvisConfig:
@@ -90,7 +119,7 @@ class JarvisConfig:
     disallowed_tools: list[str] = field(default_factory=list)
 
     @classmethod
-    def load(cls, path: Path | None = None) -> "JarvisConfig":
+    def load(cls, path: Path | None = None) -> JarvisConfig:
         """Load config from YAML file, falling back to defaults."""
         config = cls()
         search_paths = [
@@ -105,7 +134,7 @@ class JarvisConfig:
         return config
 
     @classmethod
-    def _from_yaml(cls, path: Path) -> "JarvisConfig":
+    def _from_yaml(cls, path: Path) -> JarvisConfig:
         """Parse YAML config file into JarvisConfig."""
         with open(path) as f:
             data = yaml.safe_load(f) or {}
@@ -135,7 +164,7 @@ class JarvisConfig:
         return config
 
     @classmethod
-    def from_legacy_json(cls, path: Path) -> "JarvisConfig":
+    def from_legacy_json(cls, path: Path) -> JarvisConfig:
         """Import config from Jarvis4Gamba config.json format."""
         with open(path) as f:
             data = json.load(f)

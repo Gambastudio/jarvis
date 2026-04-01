@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -86,7 +85,7 @@ class JarvisAgent:
                     log.info(
                         f"Agent response ({message.duration_ms}ms, "
                         f"{message.num_turns} turns, "
-                        f"\${message.total_cost_usd or 0:.4f})"
+                        rf"\${message.total_cost_usd or 0:.4f})"
                     )
         except Exception as e:
             log.error(f"Agent SDK error: {e}")

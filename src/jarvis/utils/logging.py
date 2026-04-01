@@ -12,9 +12,9 @@ def setup_logging(level: str = "INFO", log_file: str | None = None) -> logging.L
 
     # Console handler
     console = logging.StreamHandler(sys.stdout)
-    console.setFormatter(logging.Formatter(
-        "%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S"
-    ))
+    console.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
+    )
     logger.addHandler(console)
 
     # File handler
@@ -22,9 +22,9 @@ def setup_logging(level: str = "INFO", log_file: str | None = None) -> logging.L
         log_path = Path(log_file).expanduser()
         log_path.parent.mkdir(parents=True, exist_ok=True)
         file_handler = logging.FileHandler(log_path, mode="a")
-        file_handler.setFormatter(logging.Formatter(
-            "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-        ))
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+        )
         logger.addHandler(file_handler)
 
     # Suppress noisy libraries

@@ -22,6 +22,7 @@ log = logging.getLogger("jarvis")
 
 class PipelineState(Enum):
     """Voice pipeline states."""
+
     IDLE = "idle"
     LISTENING = "listening"
     PROCESSING = "processing"
@@ -158,4 +159,6 @@ class VoicePipeline:
         self.stt.mute()
         await self.tts.speak(text)
         self.stt.unmute()
-        self.state = PipelineState.IDLE if prev_state == PipelineState.IDLE else PipelineState.LISTENING
+        self.state = (
+            PipelineState.IDLE if prev_state == PipelineState.IDLE else PipelineState.LISTENING
+        )

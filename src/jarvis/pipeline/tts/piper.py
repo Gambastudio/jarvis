@@ -26,6 +26,7 @@ class PiperTTSEngine(TTSEngine):
         try:
             # Lazy import — only needed when piper engine is selected
             import piper  # noqa: F811
+
             if self._piper is None:
                 self._piper = piper.PiperVoice.load(self.voice)
             # TODO: Implement Piper audio playback

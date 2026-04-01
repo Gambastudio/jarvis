@@ -23,7 +23,7 @@ class CostTracker:
         self.total_usd += cost_usd
         self.interaction_count += 1
         self._history.append(cost_usd)
-        log.info(f"Cost: \${cost_usd:.4f} (total: \${self.total_usd:.4f})")
+        log.info(rf"Cost: \${cost_usd:.4f} (total: \${self.total_usd:.4f})")
 
     @property
     def average_cost(self) -> float:
@@ -34,6 +34,6 @@ class CostTracker:
     def summary(self) -> str:
         return (
             f"{self.interaction_count} interactions, "
-            f"total: \${self.total_usd:.4f}, "
-            f"avg: \${self.average_cost:.4f}"
+            rf"total: \${self.total_usd:.4f}, "
+            rf"avg: \${self.average_cost:.4f}"
         )

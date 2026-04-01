@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from unittest.mock import MagicMock
+
 import pytest
 
-from jarvis.pipeline.stt.realtimestt import RealtimeSTTEngine
-from jarvis.pipeline.base import STTEngine
 from jarvis.config import STTConfig, VADConfig
+from jarvis.pipeline.base import STTEngine
+from jarvis.pipeline.stt.realtimestt import RealtimeSTTEngine
 
 
 def test_realtimestt_implements_stt_engine():

@@ -30,14 +30,16 @@ def listen(
     cfg = JarvisConfig.load(config)
     setup_logging(cfg.logging.level, cfg.logging.file)
 
-    console.print(Panel.fit(
-        f"[bold green]Jarvis v{__version__}[/bold green]\n"
-        f"Wake word: [cyan]{cfg.session.wake_word}[/cyan]\n"
-        f"STT: {cfg.stt.engine} ({cfg.stt.model})\n"
-        f"TTS: {cfg.tts.engine}\n"
-        f"Model: {cfg.agent.model}",
-        title="Starting Voice Pipeline",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold green]Jarvis v{__version__}[/bold green]\n"
+            f"Wake word: [cyan]{cfg.session.wake_word}[/cyan]\n"
+            f"STT: {cfg.stt.engine} ({cfg.stt.model})\n"
+            f"TTS: {cfg.tts.engine}\n"
+            f"Model: {cfg.agent.model}",
+            title="Starting Voice Pipeline",
+        )
+    )
 
     asyncio.run(_run_pipeline(cfg))
 
@@ -46,8 +48,8 @@ async def _run_pipeline(cfg) -> None:
     """Main voice pipeline — delegates to VoicePipeline orchestrator."""
     from jarvis.agent.core import JarvisAgent
     from jarvis.pipeline.orchestrator import VoicePipeline
-    from jarvis.pipeline.wake.whisper_wake import WhisperWakeEngine
     from jarvis.pipeline.tts.macos_say import MacOSSayEngine
+    from jarvis.pipeline.wake.whisper_wake import WhisperWakeEngine
 
     try:
         from jarvis.pipeline.stt.realtimestt import RealtimeSTTEngine
@@ -70,8 +72,8 @@ def query_text(
     config: Path | None = typer.Option(None, "--config", "-c", help="Path to jarvis.yaml"),
 ) -> None:
     """Send a text query to the agent (no voice, useful for testing)."""
-    from jarvis.config import JarvisConfig
     from jarvis.agent.core import JarvisAgent
+    from jarvis.config import JarvisConfig
     from jarvis.utils.logging import setup_logging
 
     cfg = JarvisConfig.load(config)
@@ -96,11 +98,13 @@ def version() -> None:
 def config(
     init: bool = typer.Option(False, "--init", help="Create default config file"),
     show: bool = typer.Option(False, "--show", help="Show current config"),
-    migrate: Path | None = typer.Option(None, "--migrate", help="Migrate from Jarvis4Gamba config.json"),
+    migrate: Path | None = typer.Option(
+        None, "--migrate", help="Migrate from Jarvis4Gamba config.json"
+    ),
 ) -> None:
     """Manage Jarvis configuration."""
-    from jarvis.config import JarvisConfig, DEFAULT_CONFIG_FILE
-    import yaml
+
+    from jarvis.config import DEFAULT_CONFIG_FILE, JarvisConfig
 
     if init:
         DEFAULT_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)

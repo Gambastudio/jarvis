@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, AsyncMock
 import asyncio
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
-from jarvis.pipeline.orchestrator import VoicePipeline, PipelineState
 from jarvis.config import JarvisConfig
+from jarvis.pipeline.orchestrator import PipelineState, VoicePipeline
 
 
 @pytest.fixture

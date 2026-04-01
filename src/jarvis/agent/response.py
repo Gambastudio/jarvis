@@ -20,6 +20,7 @@ class ResponseType(Enum):
 @dataclass
 class JarvisResponse:
     """Parsed agent response with routing information."""
+
     response_type: ResponseType
     spoken_text: str
     display_data: dict | None = None

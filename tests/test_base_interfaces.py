@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import inspect
 
-from jarvis.pipeline.base import STTEngine, TTSEngine, WakeWordEngine
+from jarvis.pipeline.base import STTEngine
 
 
 def test_stt_engine_has_callback_interface():
