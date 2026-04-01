@@ -1,8 +1,10 @@
 """Tests for macOS Keychain helper."""
+
 from __future__ import annotations
 
-from unittest.mock import patch, MagicMock
-from jarvis.utils.keychain import set_api_key, get_api_key, has_api_key
+from unittest.mock import MagicMock, patch
+
+from jarvis.utils.keychain import get_api_key, has_api_key, set_api_key
 
 
 def test_set_api_key_calls_security():

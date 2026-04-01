@@ -3,6 +3,7 @@
 Uses a queue.Queue for thread safety: background threads call enqueue(),
 the Main Thread polls via flush() (called from a rumps.Timer every 100ms).
 """
+
 from __future__ import annotations
 
 import logging
@@ -12,17 +13,21 @@ log = logging.getLogger("jarvis")
 
 # Color map: log category → (R, G, B)
 _COLORS = {
-    "stt":     (0.4, 0.8, 1.0),    # light blue
-    "jarvis":  (0.4, 1.0, 0.4),    # green
-    "session": (1.0, 0.85, 0.2),   # yellow
-    "error":   (1.0, 0.3, 0.3),    # red
-    "system":  (0.7, 0.5, 1.0),    # purple
-    "default": (0.75, 0.75, 0.75), # grey
-    "time":    (0.5, 0.5, 0.5),    # dark grey
+    "stt": (0.4, 0.8, 1.0),  # light blue
+    "jarvis": (0.4, 1.0, 0.4),  # green
+    "session": (1.0, 0.85, 0.2),  # yellow
+    "error": (1.0, 0.3, 0.3),  # red
+    "system": (0.7, 0.5, 1.0),  # purple
+    "default": (0.75, 0.75, 0.75),  # grey
+    "time": (0.5, 0.5, 0.5),  # dark grey
 }
 _EMOJIS = {
-    "stt": "🎙", "jarvis": "🤖", "session": "●",
-    "error": "❌", "system": "⚙️", "default": "  ",
+    "stt": "🎙",
+    "jarvis": "🤖",
+    "session": "●",
+    "error": "❌",
+    "system": "⚙️",
+    "default": "  ",
 }
 _BG = (0.1, 0.1, 0.12)
 _MAX_LINES = 500
@@ -30,11 +35,16 @@ _MAX_LINES = 500
 
 def _classify(text: str) -> str:
     t = text.lower()
-    if "stt:" in t:                        return "stt"
-    if "jarvis:" in t:                     return "jarvis"
-    if "session" in t:                     return "session"
-    if "error" in t or "fehler" in t:      return "error"
-    if "recorder" in t or "pipeline" in t: return "system"
+    if "stt:" in t:
+        return "stt"
+    if "jarvis:" in t:
+        return "jarvis"
+    if "session" in t:
+        return "session"
+    if "error" in t or "fehler" in t:
+        return "error"
+    if "recorder" in t or "pipeline" in t:
+        return "system"
     return "default"
 
 
@@ -51,6 +61,7 @@ class LogWindow:
     def _nscolor(self, rgb: tuple) -> object:
         if rgb not in self._color_cache:
             from AppKit import NSColor
+
             self._color_cache[rgb] = NSColor.colorWithCalibratedRed_green_blue_alpha_(
                 rgb[0], rgb[1], rgb[2], 1.0
             )
@@ -63,16 +74,27 @@ class LogWindow:
             return
 
         from AppKit import (
-            NSWindow, NSTextView, NSScrollView, NSFont,
-            NSMakeRect, NSBackingStoreBuffered,
-            NSWindowStyleMaskTitled, NSWindowStyleMaskClosable,
-            NSWindowStyleMaskResizable, NSWindowStyleMaskMiniaturizable,
-            NSBezelBorder, NSWindowCollectionBehaviorCanJoinAllSpaces,
+            NSBackingStoreBuffered,
+            NSBezelBorder,
+            NSFont,
+            NSMakeRect,
+            NSScrollView,
+            NSTextView,
+            NSWindow,
+            NSWindowCollectionBehaviorCanJoinAllSpaces,
+            NSWindowStyleMaskClosable,
+            NSWindowStyleMaskMiniaturizable,
+            NSWindowStyleMaskResizable,
+            NSWindowStyleMaskTitled,
         )
 
         bg = self._nscolor(_BG)
-        style = (NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
-                 NSWindowStyleMaskResizable | NSWindowStyleMaskMiniaturizable)
+        style = (
+            NSWindowStyleMaskTitled
+            | NSWindowStyleMaskClosable
+            | NSWindowStyleMaskResizable
+            | NSWindowStyleMaskMiniaturizable
+        )
         self._window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
             NSMakeRect(100, 200, 720, 480), style, NSBackingStoreBuffered, False
         )
@@ -140,8 +162,8 @@ class LogWindow:
 
     def _append(self, text: str) -> None:
         """Append one colored line to the NSTextView. Main Thread only."""
-        from AppKit import NSAttributedString, NSForegroundColorAttributeName, NSFontAttributeName
-        from Foundation import NSMutableAttributedString, NSDictionary
+        from AppKit import NSAttributedString, NSFontAttributeName, NSForegroundColorAttributeName
+        from Foundation import NSDictionary, NSMutableAttributedString
 
         category = _classify(text)
         color = self._nscolor(_COLORS.get(category, _COLORS["default"]))
@@ -191,9 +213,9 @@ class WindowLogHandler(logging.Handler):
     def __init__(self, log_window: LogWindow) -> None:
         super().__init__()
         self.log_window = log_window
-        self.setFormatter(logging.Formatter(
-            "%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S"
-        ))
+        self.setFormatter(
+            logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
+        )
 
     def emit(self, record: logging.LogRecord) -> None:
         try:

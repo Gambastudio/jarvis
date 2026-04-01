@@ -141,7 +141,11 @@ def test_state_callback_called_on_transition(mock_components):
     stt, tts, wake, agent, config = mock_components
     states_seen = []
     pipeline = VoicePipeline(
-        stt=stt, tts=tts, wake=wake, agent=agent, config=config,
+        stt=stt,
+        tts=tts,
+        wake=wake,
+        agent=agent,
+        config=config,
         state_callback=lambda s: states_seen.append(s),
     )
     wake.check_transcription.return_value = ""

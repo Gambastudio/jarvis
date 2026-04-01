@@ -3,10 +3,11 @@
 Uses the 'security' CLI tool to store/retrieve the Anthropic API key
 in the macOS Keychain — never written to disk or environment files.
 """
+
 from __future__ import annotations
 
-import subprocess
 import logging
+import subprocess
 
 log = logging.getLogger("jarvis")
 
@@ -17,10 +18,9 @@ _ACCOUNT = "anthropic-api-key"
 def set_api_key(api_key: str) -> bool:
     """Store API key in macOS Keychain. Overwrites existing entry."""
     result = subprocess.run(
-        ["security", "add-generic-password",
-         "-s", _SERVICE, "-a", _ACCOUNT,
-         "-w", api_key, "-U"],
-        capture_output=True, text=True,
+        ["security", "add-generic-password", "-s", _SERVICE, "-a", _ACCOUNT, "-w", api_key, "-U"],
+        capture_output=True,
+        text=True,
     )
     if result.returncode == 0:
         log.info("API key saved to Keychain")
@@ -32,9 +32,9 @@ def set_api_key(api_key: str) -> bool:
 def get_api_key() -> str | None:
     """Retrieve API key from macOS Keychain. Returns None if not found."""
     result = subprocess.run(
-        ["security", "find-generic-password",
-         "-s", _SERVICE, "-a", _ACCOUNT, "-w"],
-        capture_output=True, text=True,
+        ["security", "find-generic-password", "-s", _SERVICE, "-a", _ACCOUNT, "-w"],
+        capture_output=True,
+        text=True,
     )
     if result.returncode == 0:
         return result.stdout.strip() or None
