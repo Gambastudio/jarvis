@@ -118,7 +118,7 @@ class JarvisMenuBarApp(rumps.App):
         settings["🔑 API Key setzen..."] = rumps.MenuItem(
             "🔑 API Key setzen...", callback=self._set_api_key
         )
-        settings.update({None: None})
+        settings.update([None])
 
         # Wake/Stop/Exit words
         settings[f"Wake Word: {self.cfg.session.wake_word}"] = rumps.MenuItem(
@@ -130,7 +130,7 @@ class JarvisMenuBarApp(rumps.App):
         settings[f"Exit-Phrase: {self.cfg.session.exit_phrase}"] = rumps.MenuItem(
             f"Exit-Phrase: {self.cfg.session.exit_phrase}", callback=self._set_exit_phrase
         )
-        settings.update({None: None})
+        settings.update([None])
 
         # Whisper model submenu
         whisper_menu = rumps.MenuItem(f"Whisper: {self.cfg.stt.model}")
@@ -156,7 +156,7 @@ class JarvisMenuBarApp(rumps.App):
         settings[f"Sprechgeschwindigkeit: {self.cfg.tts.rate} wpm"] = rumps.MenuItem(
             f"Sprechgeschwindigkeit: {self.cfg.tts.rate} wpm", callback=self._set_tts_rate
         )
-        settings.update({None: None})
+        settings.update([None])
 
         # Claude model submenu
         current_label = CLAUDE_MODELS.get(self.cfg.agent.model, self.cfg.agent.model)
