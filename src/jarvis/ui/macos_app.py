@@ -41,6 +41,20 @@ CLAUDE_MODELS = {
 }
 LANGUAGES = {"de": "Deutsch", "en": "English", "fr": "Français", "es": "Español"}
 
+# Model size hints for download status message
+_MODEL_SIZES = {"tiny": "75MB", "base": "150MB", "small": "500MB"}
+
+
+def _is_model_cached(model: str) -> bool:
+    """Check if the faster-whisper model weights are in the huggingface cache."""
+    try:
+        from huggingface_hub import try_to_load_from_cache
+
+        result = try_to_load_from_cache(f"Systran/faster-whisper-{model}", "model.bin")
+        return isinstance(result, str)
+    except Exception:
+        return False  # safe default: assume not cached
+
 
 class JarvisMenuBarApp(rumps.App):
     """Jarvis Menu Bar App — wraps VoicePipeline with full macOS UI."""
@@ -225,7 +239,11 @@ class JarvisMenuBarApp(rumps.App):
 
         self._pipeline_thread = threading.Thread(target=run, daemon=True, name="VoicePipeline")
         self._pipeline_thread.start()
-        self._update_status(f"Wartet auf '{self.cfg.session.wake_word}'...")
+        if not _is_model_cached(self.cfg.stt.model):
+            size = _MODEL_SIZES.get(self.cfg.stt.model, "?")
+            self._update_status(f"📥 Lade {self.cfg.stt.model}-Modell herunter (~{size})...")
+        else:
+            self._update_status(f"Wartet auf '{self.cfg.session.wake_word}'...")
 
     def _on_state_change(self, state: PipelineState) -> None:
         """Called from pipeline thread — update icon thread-safely."""
