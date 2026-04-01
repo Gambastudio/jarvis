@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from enum import Enum
 from typing import TYPE_CHECKING
 
@@ -51,13 +52,28 @@ class VoicePipeline:
         wake: WakeWordEngine,
         agent: JarvisAgent,
         config: JarvisConfig,
+        state_callback: Callable[[PipelineState], None] | None = None,
     ) -> None:
         self.stt = stt
         self.tts = tts
         self.wake = wake
         self.agent = agent
         self.config = config
-        self.state = PipelineState.IDLE
+        self.state_callback = state_callback
+        self._state = PipelineState.IDLE
+
+    @property
+    def state(self) -> PipelineState:
+        return self._state
+
+    @state.setter
+    def state(self, value: PipelineState) -> None:
+        self._state = value
+        if self.state_callback:
+            try:
+                self.state_callback(value)
+            except Exception as e:
+                log.warning(f"state_callback error: {e}")
 
     async def run(self) -> None:
         """Main pipeline loop with auto-recovery.

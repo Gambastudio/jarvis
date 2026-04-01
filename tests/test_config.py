@@ -34,3 +34,14 @@ def test_get_api_key_missing(monkeypatch):
         assert False, "Should have raised ValueError"
     except ValueError:
         pass
+
+
+def test_config_save(tmp_path):
+    """save() should write config to YAML file."""
+    cfg = JarvisConfig()
+    cfg.session.wake_word = "hey jarvis"
+    out = tmp_path / "jarvis.yaml"
+    cfg.save(out)
+    assert out.exists()
+    loaded = JarvisConfig.load(out)
+    assert loaded.session.wake_word == "hey jarvis"

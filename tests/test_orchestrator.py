@@ -134,3 +134,16 @@ def test_speaking_state_ignores_input(mock_components):
     pipeline._on_transcription("some text")
     agent.ask.assert_not_called()
     wake.check_transcription.assert_not_called()
+
+
+def test_state_callback_called_on_transition(mock_components):
+    """state_callback should be called whenever state changes."""
+    stt, tts, wake, agent, config = mock_components
+    states_seen = []
+    pipeline = VoicePipeline(
+        stt=stt, tts=tts, wake=wake, agent=agent, config=config,
+        state_callback=lambda s: states_seen.append(s),
+    )
+    wake.check_transcription.return_value = ""
+    pipeline._on_transcription("Jarvis")
+    assert PipelineState.LISTENING in states_seen

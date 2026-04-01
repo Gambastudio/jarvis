@@ -187,6 +187,33 @@ class JarvisConfig:
             pass  # System prompt now lives in CLAUDE.md
         return config
 
+    def save(self, path: Path | None = None) -> None:
+        """Write current config to YAML file."""
+        target = path or DEFAULT_CONFIG_FILE
+        target.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "wake_word": {"engine": self.wake_word.engine, "variants": self.wake_word.variants},
+            "stt": {"engine": self.stt.engine, "model": self.stt.model,
+                    "language": self.stt.language, "compute_type": self.stt.compute_type,
+                    "initial_prompt": self.stt.initial_prompt},
+            "tts": {"engine": self.tts.engine, "rate": self.tts.rate,
+                    "voice": self.tts.voice, "piper_voice": self.tts.piper_voice},
+            "vad": {"sensitivity": self.vad.sensitivity,
+                    "post_speech_silence": self.vad.post_speech_silence,
+                    "min_recording_length": self.vad.min_recording_length},
+            "session": {"wake_word": self.session.wake_word, "stop_word": self.session.stop_word,
+                        "exit_phrase": self.session.exit_phrase, "max_history": self.session.max_history},
+            "agent": {"api_key_env": self.agent.api_key_env, "model": self.agent.model,
+                      "max_turns": self.agent.max_turns, "max_budget_usd": self.agent.max_budget_usd,
+                      "permission_mode": self.agent.permission_mode},
+            "audio": {"input_device": self.audio.input_device, "output_device": self.audio.output_device,
+                      "sample_rate": self.audio.sample_rate},
+            "logging": {"level": self.logging.level, "file": self.logging.file,
+                        "cost_tracking": self.logging.cost_tracking},
+        }
+        with open(target, "w") as f:
+            yaml.dump(data, f, allow_unicode=True, default_flow_style=False)
+
     def get_api_key(self) -> str:
         """Resolve API key from environment variable."""
         key = os.getenv(self.agent.api_key_env, "")
