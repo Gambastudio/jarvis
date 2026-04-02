@@ -24,7 +24,14 @@ import rumps
 from jarvis.config import JarvisConfig, MemoryConfig
 from jarvis.pipeline.orchestrator import PipelineState, VoicePipeline
 from jarvis.ui.log_window import LogWindow, WindowLogHandler
-from jarvis.utils.keychain import get_api_key, has_api_key, set_api_key
+from jarvis.utils.keychain import (
+    get_api_key,
+    get_deepgram_key,
+    has_api_key,
+    has_deepgram_key,
+    set_api_key,
+    set_deepgram_key,
+)
 
 log = logging.getLogger("jarvis")
 
@@ -37,6 +44,10 @@ STATE_ICONS: dict[PipelineState, str] = {
 }
 ERROR_ICON = "🔴"
 
+STT_ENGINES = {
+    "realtimestt": "RealtimeSTT (lokal)",
+    "deepgram": "Deepgram Nova-3 (cloud)",
+}
 WHISPER_MODELS = ["tiny", "base", "small"]
 CLAUDE_MODELS = {
     "claude-haiku-4-5": "Haiku (schnell)",
@@ -118,11 +129,22 @@ class JarvisMenuBarApp(rumps.App):
     def _build_settings_menu(self) -> rumps.MenuItem:
         settings = rumps.MenuItem("⚙️ Einstellungen")
 
-        # API Key
-        settings["🔑 API Key setzen..."] = rumps.MenuItem(
-            "🔑 API Key setzen...", callback=self._set_api_key
+        # API Keys
+        settings["🔑 Anthropic API Key..."] = rumps.MenuItem(
+            "🔑 Anthropic API Key...", callback=self._set_api_key
         )
+        dg_label = "🔑 Deepgram API Key..." + (" ✓" if has_deepgram_key() else "")
+        settings[dg_label] = rumps.MenuItem(dg_label, callback=self._set_deepgram_key)
         settings.update([None])
+
+        # STT Engine submenu
+        current_stt = STT_ENGINES.get(self.cfg.stt.engine, self.cfg.stt.engine)
+        stt_menu = rumps.MenuItem(f"STT: {current_stt}")
+        for engine_id, label in STT_ENGINES.items():
+            check = "✓ " if engine_id == self.cfg.stt.engine else "  "
+            item = rumps.MenuItem(f"{check}{label}", callback=self._set_stt_engine)
+            stt_menu[engine_id] = item
+        settings["stt_engine"] = stt_menu
 
         # Wake/Stop/Exit words
         settings[f"Wake Word: {self.cfg.session.wake_word}"] = rumps.MenuItem(
@@ -215,16 +237,27 @@ class JarvisMenuBarApp(rumps.App):
             import os
 
             from jarvis.agent.core import JarvisAgent
-            from jarvis.pipeline.stt.realtimestt import RealtimeSTTEngine
             from jarvis.pipeline.tts.macos_say import MacOSSayEngine
             from jarvis.pipeline.wake.whisper_wake import WhisperWakeEngine
 
-            # Inject API key from Keychain into environment
+            # Inject API keys from Keychain into environment
             api_key = get_api_key()
             if api_key:
                 os.environ["ANTHROPIC_API_KEY"] = api_key
+            dg_key = get_deepgram_key()
+            if dg_key:
+                os.environ["DEEPGRAM_API_KEY"] = dg_key
 
-            stt = RealtimeSTTEngine(stt_config=self.cfg.stt, vad_config=self.cfg.vad)
+            # Select STT engine
+            if self.cfg.stt.engine == "deepgram":
+                from jarvis.pipeline.stt.deepgram_stt import DeepgramSTTEngine
+
+                stt = DeepgramSTTEngine(stt_config=self.cfg.stt, vad_config=self.cfg.vad)
+                log.info("Using Deepgram Nova-3 STT")
+            else:
+                from jarvis.pipeline.stt.realtimestt import RealtimeSTTEngine
+
+                stt = RealtimeSTTEngine(stt_config=self.cfg.stt, vad_config=self.cfg.vad)
             tts = MacOSSayEngine(rate=self.cfg.tts.rate, voice=self.cfg.tts.voice)
             wake = WhisperWakeEngine(self.cfg.wake_word.variants)
             agent = JarvisAgent(self.cfg)
@@ -260,7 +293,9 @@ class JarvisMenuBarApp(rumps.App):
 
         self._pipeline_thread = threading.Thread(target=run, daemon=True, name="VoicePipeline")
         self._pipeline_thread.start()
-        if not _is_model_cached(self.cfg.stt.model):
+        if self.cfg.stt.engine == "deepgram":
+            self._update_status("Verbinde mit Deepgram...")
+        elif not _is_model_cached(self.cfg.stt.model):
             size = _MODEL_SIZES.get(self.cfg.stt.model, "?")
             self._update_status(f"📥 Lade {self.cfg.stt.model}-Modell herunter (~{size})...")
         else:
@@ -313,6 +348,37 @@ class JarvisMenuBarApp(rumps.App):
                 rumps.alert("API Key gespeichert", "Key wurde sicher im Keychain hinterlegt.")
                 if not self._pipeline_thread or not self._pipeline_thread.is_alive():
                     self._start_pipeline()
+
+    def _set_deepgram_key(self, _) -> None:
+        response = rumps.Window(
+            message="Deepgram API Key eingeben:\n(https://console.deepgram.com)",
+            title="🔑 Deepgram API Key",
+            secure=True,
+            ok="Speichern",
+            cancel="Abbrechen",
+        ).run()
+        if response.clicked and response.text.strip():
+            if set_deepgram_key(response.text.strip()):
+                rumps.alert("Deepgram Key gespeichert", "Key wurde sicher im Keychain hinterlegt.")
+                self._rebuild_menu_labels()
+
+    def _set_stt_engine(self, sender) -> None:
+        for engine_id, label in STT_ENGINES.items():
+            if label in sender.title:
+                if engine_id == "deepgram" and not has_deepgram_key():
+                    rumps.alert(
+                        "Deepgram API Key fehlt",
+                        "Bitte zuerst einen Deepgram API Key setzen.",
+                    )
+                    return
+                self.cfg.stt.engine = engine_id
+                self.cfg.save()
+                self._rebuild_menu_labels()
+                rumps.alert(
+                    "STT Engine geändert",
+                    f"Wechsel zu {label}.\nBitte App neu starten für die Änderung.",
+                )
+                break
 
     def _set_wake_word(self, _) -> None:
         response = rumps.Window(
@@ -560,9 +626,13 @@ class JarvisMenuBarApp(rumps.App):
             log.info("Shutting down pipeline...")
             try:
                 self._pipeline.stt._running = False
-                if self._pipeline.stt._recorder:
+                # RealtimeSTT has _recorder; Deepgram has _connection
+                if hasattr(self._pipeline.stt, "_recorder") and self._pipeline.stt._recorder:
                     self._pipeline.stt._recorder.shutdown()
                     self._pipeline.stt._recorder = None
+                elif hasattr(self._pipeline.stt, "_connection") and self._pipeline.stt._connection:
+                    self._pipeline.stt._connection.finish()
+                    self._pipeline.stt._connection = None
             except Exception as e:
                 log.warning(f"STT cleanup error: {e}")
             try:

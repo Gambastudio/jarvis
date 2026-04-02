@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "jarvis-voice"
-version = "0.1.0-alpha"
+version = "0.3.0"
 description = "Open Source Voice Agent Framework powered by Claude Agent SDK"
 readme = "README.md"
 license = "MIT"
@@ -35,6 +35,7 @@ dependencies = [
 
 [project.optional-dependencies]
 stt = ["RealtimeSTT"]
+stt-deepgram = ["deepgram-sdk>=3.0", "pyaudio>=0.2.14"]
 tts-piper = ["piper-tts"]
 macos = ["rumps", "pyobjc-framework-Cocoa"]
 dev = [
@@ -42,7 +43,7 @@ dev = [
     "pytest-asyncio",
     "ruff>=0.4",
 ]
-all = ["jarvis-voice[stt,tts-piper,macos,dev]"]
+all = ["jarvis-voice[stt,stt-deepgram,tts-piper,macos,dev]"]
 
 [project.scripts]
 jarvis = "jarvis.cli:app"

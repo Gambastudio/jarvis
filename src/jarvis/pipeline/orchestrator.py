@@ -153,16 +153,36 @@ class VoicePipeline:
 
     def _handle_speaking(self, text: str) -> None:
         """Handle transcription during SPEAKING — listen for interrupt commands."""
-        t = text.lower().strip().rstrip(".!,?")
-        if t in self._CANCEL_WORDS:
+        if self._is_cancel(text):
             log.info("⛔ Sprache unterbrochen")
             self.tts.stop_speaking()
             self.state = PipelineState.LISTENING
 
+    def _is_cancel(self, text: str) -> bool:
+        """Check if text starts with a cancel word (handles 'Stopp Jarvis' etc.)."""
+        import re
+        normalized = re.sub(r"[.,!?;:\-]", " ", text.lower()).strip()
+        normalized = re.sub(r"\s+", " ", normalized)
+        return any(normalized == w or normalized.startswith(w + " ") for w in self._CANCEL_WORDS)
+
     def _handle_processing(self, text: str) -> None:
-        """Handle transcription during PROCESSING — listen for cancel commands."""
+        """Handle transcription during PROCESSING — listen for cancel/stop commands."""
         t = text.lower().strip().rstrip(".!,?")
-        if t in self._CANCEL_WORDS:
+
+        # Stop word ends session AND cancels current task
+        stop = self.config.session.stop_word
+        if t in [stop, f"{stop}schoen", f"{stop}schön", f"vielen {stop}"]:
+            log.info("⛔ Task abgebrochen + Session beendet")
+            self.agent.interrupt()
+            self._processing_done = True
+            self.agent.save_memory()
+            self.agent.reset_session()
+            self._say_direct("Alles klar.")
+            self.state = PipelineState.IDLE
+            log.info("SESSION ENDED")
+            return
+
+        if self._is_cancel(t):
             log.info("⛔ Task abgebrochen durch Sprachbefehl")
             self.agent.interrupt()
             self._processing_done = True

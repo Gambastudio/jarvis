@@ -28,7 +28,7 @@ mkdir -p "$MACOS_DIR" "$RESOURCES"
 echo "▶ Creating embedded venv (this takes a few minutes — torch is large)..."
 "$PYTHON312" -m venv "$VENV"
 "$VENV/bin/pip" install --upgrade pip -q
-"$VENV/bin/pip" install -e "$REPO_ROOT[macos,stt]" -q
+"$VENV/bin/pip" install -e "$REPO_ROOT[macos,stt,stt-deepgram]" -q
 echo "   Done ($(du -sh "$VENV" | cut -f1))"
 
 # ── Info.plist ─────────────────────────────────────────────────────────────────
