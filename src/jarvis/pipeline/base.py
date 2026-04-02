@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from typing import Union
 
 
 class STTEngine(ABC):
@@ -15,8 +16,17 @@ class STTEngine(ABC):
     """
 
     @abstractmethod
-    async def start(self, on_text: Callable[[str], None]) -> None:
-        """Start listening. Calls on_text(transcription) for each result."""
+    async def start(
+        self,
+        on_text: Callable[[str], None],
+        on_ready: Union[Callable[[], Awaitable[None]], Callable[[], None], None] = None,
+    ) -> None:
+        """Start listening. Calls on_text(transcription) for each result.
+
+        on_ready is called once the engine is fully initialised and listening,
+        so callers can announce readiness only after hardware is actually up.
+        May be sync or async.
+        """
         ...
 
     @abstractmethod

@@ -56,10 +56,23 @@ class WhisperWakeEngine(WakeWordEngine):
 
     def strip_wake_word(self, text: str) -> str:
         """Remove wake word from transcribed text, return the command part."""
-        cmd = text.lower()
-        for prefix in ["hey " + v for v in self.variants] + self.variants:
-            cmd = cmd.replace(prefix, "").strip()
-        return cmd
+        import re
+        # Normalize: strip punctuation for matching, then extract remaining words
+        normalized = re.sub(r"[.,!?;:\-]", " ", text.lower())
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+
+        # Try removing "hey <variant>" first (longest match), then just "<variant>"
+        for prefix in sorted(
+            ["hey " + v for v in self.variants] + self.variants,
+            key=len, reverse=True,
+        ):
+            if normalized.startswith(prefix):
+                normalized = normalized[len(prefix):].strip()
+                break
+            elif prefix in normalized:
+                normalized = normalized.replace(prefix, "", 1).strip()
+                break
+        return normalized
 
     async def start(self, callback: callable) -> None:
         self._callback = callback

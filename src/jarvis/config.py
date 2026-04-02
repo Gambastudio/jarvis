@@ -63,6 +63,7 @@ class TTSConfig:
     rate: int = 200
     voice: str | None = None
     piper_voice: str = "de_DE-thorsten-high"
+    mute_mic_during_speech: bool = True
 
 
 @dataclass
@@ -105,6 +106,12 @@ class LoggingConfig:
 
 
 @dataclass
+class MemoryConfig:
+    path: str = "~/Documents/Claude/Memory"
+    files: list[str] = field(default_factory=lambda: ["people.md"])
+
+
+@dataclass
 class JarvisConfig:
     wake_word: WakeWordConfig = field(default_factory=WakeWordConfig)
     stt: STTConfig = field(default_factory=STTConfig)
@@ -114,6 +121,7 @@ class JarvisConfig:
     agent: AgentConfig = field(default_factory=AgentConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
     mcp_servers: dict[str, Any] = field(default_factory=dict)
     allowed_tools: list[str] = field(default_factory=list)
     disallowed_tools: list[str] = field(default_factory=list)
@@ -155,6 +163,8 @@ class JarvisConfig:
             config.audio = AudioConfig(**data["audio"])
         if "logging" in data:
             config.logging = LoggingConfig(**data["logging"])
+        if "memory" in data:
+            config.memory = MemoryConfig(**data["memory"])
         if "mcp_servers" in data:
             config.mcp_servers = data["mcp_servers"]
         if "allowed_tools" in data:
@@ -233,6 +243,10 @@ class JarvisConfig:
                 "level": self.logging.level,
                 "file": self.logging.file,
                 "cost_tracking": self.logging.cost_tracking,
+            },
+            "memory": {
+                "path": self.memory.path,
+                "files": self.memory.files,
             },
         }
         with open(target, "w") as f:

@@ -8,8 +8,10 @@ asyncio.to_thread, bridging back to async via the on_text callback.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from typing import Union
 
 from jarvis.config import STTConfig, VADConfig
 from jarvis.pipeline.base import STTEngine
@@ -26,8 +28,16 @@ class RealtimeSTTEngine(STTEngine):
         self._recorder = None
         self._running = False
 
-    async def start(self, on_text: Callable[[str], None]) -> None:
-        """Start the recorder and listen for speech in a background thread."""
+    async def start(
+        self,
+        on_text: Callable[[str], None],
+        on_ready: Union[Callable[[], Awaitable[None]], Callable[[], None], None] = None,
+    ) -> None:
+        """Start the recorder and listen for speech in a background thread.
+
+        on_ready is called after AudioToTextRecorder finishes initialising
+        (model loaded, mic open) — before entering the blocking listen loop.
+        """
         from RealtimeSTT import AudioToTextRecorder  # noqa: PLC0415
 
         self._recorder = AudioToTextRecorder(
@@ -45,6 +55,10 @@ class RealtimeSTTEngine(STTEngine):
         )
         self._running = True
         log.info("RealtimeSTT recorder started")
+        if on_ready:
+            result = on_ready()
+            if inspect.isawaitable(result):
+                await result
         await asyncio.to_thread(self._listen_loop, on_text)
 
     def _listen_loop(self, on_text: Callable[[str], None]) -> None:
@@ -58,13 +72,14 @@ class RealtimeSTTEngine(STTEngine):
                     break
 
     async def stop(self) -> None:
-        """Stop the recorder and release resources."""
+        """Stop the recorder and terminate its child processes."""
         self._running = False
         if self._recorder:
             try:
-                self._recorder.stop()
-            except Exception:
-                pass
+                self._recorder.shutdown()
+            except Exception as e:
+                log.warning(f"Recorder shutdown error: {e}")
+            self._recorder = None
         log.info("RealtimeSTT recorder stopped")
 
     def mute(self) -> None:

@@ -9,15 +9,19 @@ Usage:
 
 from __future__ import annotations
 
+import atexit
 import asyncio
 import logging
+import multiprocessing
+import os
+import signal
 import subprocess
 import threading
 from pathlib import Path
 
 import rumps
 
-from jarvis.config import JarvisConfig
+from jarvis.config import JarvisConfig, MemoryConfig
 from jarvis.pipeline.orchestrator import PipelineState, VoicePipeline
 from jarvis.ui.log_window import LogWindow, WindowLogHandler
 from jarvis.utils.keychain import get_api_key, has_api_key, set_api_key
@@ -156,6 +160,10 @@ class JarvisMenuBarApp(rumps.App):
         settings[f"Sprechgeschwindigkeit: {self.cfg.tts.rate} wpm"] = rumps.MenuItem(
             f"Sprechgeschwindigkeit: {self.cfg.tts.rate} wpm", callback=self._set_tts_rate
         )
+        mute_check = "✓ " if self.cfg.tts.mute_mic_during_speech else "  "
+        settings[f"{mute_check}Mic stummschalten bei Sprache"] = rumps.MenuItem(
+            f"{mute_check}Mic stummschalten bei Sprache", callback=self._toggle_mic_mute
+        )
         settings.update([None])
 
         # Claude model submenu
@@ -178,6 +186,18 @@ class JarvisMenuBarApp(rumps.App):
         cost_check = "✓ " if self.cfg.logging.cost_tracking else "  "
         settings[f"{cost_check}Kosten-Tracking"] = rumps.MenuItem(
             f"{cost_check}Kosten-Tracking", callback=self._toggle_cost_tracking
+        )
+        settings.update([None])
+
+        # Memory settings
+        mem_path = self.cfg.memory.path
+        short_path = mem_path.replace(str(Path.home()), "~")
+        settings[f"📂 Memory-Pfad: {short_path}"] = rumps.MenuItem(
+            f"📂 Memory-Pfad: {short_path}", callback=self._set_memory_path
+        )
+        files_label = ", ".join(self.cfg.memory.files) if self.cfg.memory.files else "(keine)"
+        settings[f"📄 Memory-Dateien: {files_label}"] = rumps.MenuItem(
+            f"📄 Memory-Dateien: {files_label}", callback=self._set_memory_files
         )
 
         return settings
@@ -216,6 +236,7 @@ class JarvisMenuBarApp(rumps.App):
                 agent=agent,
                 config=self.cfg,
                 state_callback=self._on_state_change,
+                on_exit=self._quit_from_pipeline,
             )
             try:
                 self._restart_attempts = 0
@@ -247,14 +268,17 @@ class JarvisMenuBarApp(rumps.App):
 
     def _on_state_change(self, state: PipelineState) -> None:
         """Called from pipeline thread — update icon thread-safely."""
-        self.title = STATE_ICONS.get(state, ERROR_ICON)
-        labels = {
-            PipelineState.IDLE: f"Wartet auf '{self.cfg.session.wake_word}'...",
-            PipelineState.LISTENING: "🟢 Lauscht...",
-            PipelineState.PROCESSING: "🧠 Denkt...",
-            PipelineState.SPEAKING: "🔵 Spricht...",
-        }
-        self._update_status(labels.get(state, ""))
+        try:
+            self.title = STATE_ICONS.get(state, ERROR_ICON)
+            labels = {
+                PipelineState.IDLE: f"Wartet auf '{self.cfg.session.wake_word}'...",
+                PipelineState.LISTENING: "🟢 Lauscht...",
+                PipelineState.PROCESSING: "🧠 Denkt...",
+                PipelineState.SPEAKING: "🔵 Spricht...",
+            }
+            self._update_status(labels.get(state, ""))
+        except Exception:
+            pass  # app not fully ready yet
 
     def _update_status(self, text: str) -> None:
         if hasattr(self, "_status_item"):
@@ -263,10 +287,16 @@ class JarvisMenuBarApp(rumps.App):
     # ── Log Window ─────────────────────────────────────────────────
 
     def _show_log(self, _) -> None:
-        self._log_window.create()
+        try:
+            self._log_window.create()
+        except Exception as e:
+            log.warning(f"Log window error: {e}")
 
     def _flush_log(self, _) -> None:
-        self._log_window.flush()
+        try:
+            self._log_window.flush()
+        except Exception:
+            pass
 
     # ── Settings Callbacks ─────────────────────────────────────────
 
@@ -363,6 +393,7 @@ class JarvisMenuBarApp(rumps.App):
                 self.cfg.agent.model = model_id
                 self.cfg.save()
                 self._rebuild_menu_labels()
+                self._reconfigure_agent()
                 break
 
     def _set_budget(self, _) -> None:
@@ -378,6 +409,7 @@ class JarvisMenuBarApp(rumps.App):
                 self.cfg.agent.max_budget_usd = float(response.text.strip())
                 self.cfg.save()
                 self._rebuild_menu_labels()
+                self._reconfigure_agent()
             except ValueError:
                 pass
 
@@ -395,17 +427,67 @@ class JarvisMenuBarApp(rumps.App):
                 self.cfg.agent.max_turns = max(1, min(50, turns))
                 self.cfg.save()
                 self._rebuild_menu_labels()
+                self._reconfigure_agent()
             except ValueError:
                 pass
+
+    def _reconfigure_agent(self) -> None:
+        """Restart the SDK client so the new agent config takes effect."""
+        if self._pipeline and self._pipeline.agent:
+            threading.Thread(
+                target=self._pipeline.agent.reconfigure, daemon=True
+            ).start()
+            log.info("Agent SDK restarting with new config...")
+
+    def _toggle_mic_mute(self, _) -> None:
+        self.cfg.tts.mute_mic_during_speech = not self.cfg.tts.mute_mic_during_speech
+        self.cfg.save()
+        state = "an" if self.cfg.tts.mute_mic_during_speech else "aus"
+        log.info(f"Mic-Stummschaltung bei Sprache: {state}")
+        self._rebuild_menu_labels()
 
     def _toggle_cost_tracking(self, _) -> None:
         self.cfg.logging.cost_tracking = not self.cfg.logging.cost_tracking
         self.cfg.save()
         self._rebuild_menu_labels()
 
+    def _set_memory_path(self, _) -> None:
+        response = rumps.Window(
+            message="Pfad zum Memory-Ordner (absolut oder mit ~):",
+            title="Memory-Pfad",
+            default_text=self.cfg.memory.path,
+            ok="Speichern",
+            cancel="Abbrechen",
+        ).run()
+        if response.clicked and response.text.strip():
+            self.cfg.memory.path = response.text.strip()
+            self.cfg.save()
+            self._rebuild_menu_labels()
+
+    def _set_memory_files(self, _) -> None:
+        current = ", ".join(self.cfg.memory.files)
+        response = rumps.Window(
+            message="Memory-Dateien (kommagetrennt, ohne Pfad):\nHinweis: credentials.md wird nie geladen.",
+            title="Memory-Dateien",
+            default_text=current,
+            ok="Speichern",
+            cancel="Abbrechen",
+        ).run()
+        if response.clicked:
+            raw = response.text.strip()
+            files = [f.strip() for f in raw.split(",") if f.strip()]
+            # Remove credentials.md for security
+            files = [f for f in files if f.lower() != "credentials.md"]
+            self.cfg.memory.files = files
+            self.cfg.save()
+            self._rebuild_menu_labels()
+
     def _rebuild_menu_labels(self) -> None:
         """Rebuild menu to reflect updated config values."""
-        self._build_menu()
+        try:
+            self._build_menu()
+        except Exception as e:
+            log.warning(f"Menu rebuild failed: {e}")
 
     # ── Autostart ──────────────────────────────────────────────────
 
@@ -463,10 +545,49 @@ class JarvisMenuBarApp(rumps.App):
 
     # ── Quit ───────────────────────────────────────────────────────
 
+    def _quit_from_pipeline(self) -> None:
+        """Called from pipeline thread when exit phrase is spoken."""
+        self._cleanup()
+        rumps.quit_application()
+
     def _quit(self, _) -> None:
+        self._cleanup()
+        rumps.quit_application()
+
+    def _cleanup(self) -> None:
+        """Stop pipeline and terminate all child processes."""
         if self._pipeline:
             log.info("Shutting down pipeline...")
-        rumps.quit_application()
+            try:
+                self._pipeline.stt._running = False
+                if self._pipeline.stt._recorder:
+                    self._pipeline.stt._recorder.shutdown()
+                    self._pipeline.stt._recorder = None
+            except Exception as e:
+                log.warning(f"STT cleanup error: {e}")
+            try:
+                self._pipeline.agent.close()
+            except Exception:
+                pass
+        # Kill any remaining multiprocessing children
+        for child in multiprocessing.active_children():
+            log.info(f"Terminating child process {child.pid}")
+            child.terminate()
+            child.join(timeout=3)
+            if child.is_alive():
+                child.kill()
+
+
+def _kill_orphaned_children() -> None:
+    """atexit handler — terminate any multiprocessing children that survived."""
+    for child in multiprocessing.active_children():
+        child.terminate()
+        child.join(timeout=2)
+        if child.is_alive():
+            child.kill()
+
+
+atexit.register(_kill_orphaned_children)
 
 
 def main() -> None:

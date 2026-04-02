@@ -31,19 +31,35 @@ class MacOSSayEngine(TTSEngine):
             cmd.extend(["-v", self.voice])
         cmd.append(clean)
         try:
-            # Run synchronously in a thread-pool executor — avoids asyncio
-            # subprocess issues when called from non-main-thread event loops.
             loop = asyncio.get_event_loop()
             await asyncio.wait_for(
-                loop.run_in_executor(None, lambda: subprocess.run(cmd, timeout=60)),
+                loop.run_in_executor(None, self._run_say, cmd),
                 timeout=65,
             )
         except (asyncio.TimeoutError, subprocess.TimeoutExpired):
             log.warning("TTS timeout after 60s")
+            self.stop_speaking()
         except Exception as e:
             log.error(f"TTS error: {e}")
 
-    async def stop(self) -> None:
+    def _run_say(self, cmd: list[str]) -> None:
+        """Run say command with a trackable Popen process."""
+        self._process = subprocess.Popen(cmd)
+        self._process.wait(timeout=60)
+        self._process = None
+
+    def stop_speaking(self) -> None:
+        """Kill the running say process immediately."""
         if self._process:
-            self._process.terminate()
+            try:
+                self._process.terminate()
+                self._process.wait(timeout=2)
+            except Exception:
+                try:
+                    self._process.kill()
+                except Exception:
+                    pass
             self._process = None
+
+    async def stop(self) -> None:
+        self.stop_speaking()

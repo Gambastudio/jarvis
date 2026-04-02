@@ -9,7 +9,8 @@ cd "$REPO_ROOT"
 
 APP_NAME="Jarvis"
 BUNDLE_ID="com.gambastudio.jarvis"
-VERSION="$(python3.12 -c "from importlib.metadata import version; print(version('jarvis-voice'))" 2>/dev/null || echo "0.1.0")"
+PYTHON312="${PYTHON312:-$(command -v python3.12 || echo /opt/homebrew/bin/python3.12)}"
+VERSION="$(grep '^version = ' "$REPO_ROOT/pyproject.toml" | head -1 | sed 's/version = "\(.*\)"/\1/')"
 BUILD_DIR="$REPO_ROOT/build"
 APP_DIR="$BUILD_DIR/$APP_NAME.app"
 CONTENTS="$APP_DIR/Contents"
@@ -25,7 +26,7 @@ mkdir -p "$MACOS_DIR" "$RESOURCES"
 
 # ── Embedded venv ──────────────────────────────────────────────────────────────
 echo "▶ Creating embedded venv (this takes a few minutes — torch is large)..."
-python3.12 -m venv "$VENV"
+"$PYTHON312" -m venv "$VENV"
 "$VENV/bin/pip" install --upgrade pip -q
 "$VENV/bin/pip" install -e "$REPO_ROOT[macos,stt]" -q
 echo "   Done ($(du -sh "$VENV" | cut -f1))"
@@ -95,11 +96,25 @@ ARCHIVE="$BUILD_DIR/$APP_NAME-v$VERSION.zip"
 echo "▶ Creating archive..."
 ( cd "$BUILD_DIR" && zip -r "$APP_NAME-v$VERSION.zip" "$APP_NAME.app" -q )
 
+# ── Git tag (optional, skip with SKIP_TAG=1) ──────────────────────────────────
+if [ "${SKIP_TAG:-0}" != "1" ] && git -C "$REPO_ROOT" diff --quiet && git -C "$REPO_ROOT" diff --cached --quiet; then
+    TAG="v$VERSION"
+    if git -C "$REPO_ROOT" tag | grep -q "^$TAG$"; then
+        echo "⚠  Tag $TAG already exists — skipping (set SKIP_TAG=1 to suppress)"
+    else
+        git -C "$REPO_ROOT" tag -a "$TAG" -m "Release $TAG"
+        echo "▶ Tagged $TAG"
+    fi
+else
+    echo "⚠  Uncommitted changes — skipping git tag (commit first, or set SKIP_TAG=1)"
+fi
+
 echo ""
-echo "✅ Build complete!"
+echo "✅ Build complete!  v$VERSION"
 echo "   App:     $APP_DIR"
 echo "   Size:    $(du -sh "$APP_DIR" | cut -f1)"
 echo "   Archive: $ARCHIVE"
 echo "   Size:    $(du -sh "$ARCHIVE" | cut -f1)"
 echo ""
 echo "To install: cp -r $APP_DIR /Applications/"
+echo "To push tag: git push origin v$VERSION"
