@@ -27,10 +27,13 @@ from jarvis.ui.log_window import LogWindow, WindowLogHandler
 from jarvis.utils.keychain import (
     get_api_key,
     get_deepgram_key,
+    get_elevenlabs_key,
     has_api_key,
     has_deepgram_key,
+    has_elevenlabs_key,
     set_api_key,
     set_deepgram_key,
+    set_elevenlabs_key,
 )
 
 log = logging.getLogger("jarvis")
@@ -41,12 +44,24 @@ STATE_ICONS: dict[PipelineState, str] = {
     PipelineState.LISTENING: "🟢",
     PipelineState.PROCESSING: "🟢",
     PipelineState.SPEAKING: "🔵",
+    PipelineState.PERMISSION_PENDING: "🔐",
 }
 ERROR_ICON = "🔴"
 
 STT_ENGINES = {
     "realtimestt": "RealtimeSTT (lokal)",
     "deepgram": "Deepgram Nova-3 (cloud)",
+}
+TTS_ENGINES = {
+    "macos-say": "macOS Say (System)",
+    "piper": "Piper (lokal, neural)",
+    "elevenlabs": "ElevenLabs (cloud, premium)",
+}
+PIPER_VOICES = {
+    "de_DE-thorsten-high": "Thorsten High (DE)",
+    "de_DE-thorsten-medium": "Thorsten Medium (DE)",
+    "en_US-lessac-high": "Lessac High (EN)",
+    "en_US-lessac-medium": "Lessac Medium (EN)",
 }
 WHISPER_MODELS = ["tiny", "base", "small"]
 CLAUDE_MODELS = {
@@ -129,102 +144,158 @@ class JarvisMenuBarApp(rumps.App):
     def _build_settings_menu(self) -> rumps.MenuItem:
         settings = rumps.MenuItem("⚙️ Einstellungen")
 
-        # API Keys
-        settings["🔑 Anthropic API Key..."] = rumps.MenuItem(
-            "🔑 Anthropic API Key...", callback=self._set_api_key
-        )
-        dg_label = "🔑 Deepgram API Key..." + (" ✓" if has_deepgram_key() else "")
-        settings[dg_label] = rumps.MenuItem(dg_label, callback=self._set_deepgram_key)
+        # ── API Keys ──────────────────────────────────────────────
+        keys_menu = rumps.MenuItem("🔑 API Keys")
+        ant_label = "Anthropic" + (" ✓" if has_api_key() else " ✗")
+        keys_menu[ant_label] = rumps.MenuItem(ant_label, callback=self._set_api_key)
+        dg_label = "Deepgram" + (" ✓" if has_deepgram_key() else " ✗")
+        keys_menu[dg_label] = rumps.MenuItem(dg_label, callback=self._set_deepgram_key)
+        el_label = "ElevenLabs" + (" ✓" if has_elevenlabs_key() else " ✗")
+        keys_menu[el_label] = rumps.MenuItem(el_label, callback=self._set_elevenlabs_key)
+        settings["keys"] = keys_menu
+
         settings.update([None])
 
-        # STT Engine submenu
-        current_stt = STT_ENGINES.get(self.cfg.stt.engine, self.cfg.stt.engine)
-        stt_menu = rumps.MenuItem(f"STT: {current_stt}")
+        # ── Spracheingabe (STT) ───────────────────────────────────
+        stt_section = rumps.MenuItem("🎙 Spracheingabe")
+
+        # Engine
         for engine_id, label in STT_ENGINES.items():
             check = "✓ " if engine_id == self.cfg.stt.engine else "  "
             item = rumps.MenuItem(f"{check}{label}", callback=self._set_stt_engine)
-            stt_menu[engine_id] = item
-        settings["stt_engine"] = stt_menu
+            stt_section[engine_id] = item
 
-        # Wake/Stop/Exit words
-        settings[f"Wake Word: {self.cfg.session.wake_word}"] = rumps.MenuItem(
-            f"Wake Word: {self.cfg.session.wake_word}", callback=self._set_wake_word
-        )
-        settings[f"Stop Word: {self.cfg.session.stop_word}"] = rumps.MenuItem(
-            f"Stop Word: {self.cfg.session.stop_word}", callback=self._set_stop_word
-        )
-        settings[f"Exit-Phrase: {self.cfg.session.exit_phrase}"] = rumps.MenuItem(
-            f"Exit-Phrase: {self.cfg.session.exit_phrase}", callback=self._set_exit_phrase
-        )
+        stt_section.update([None])
+
+        # Whisper model (only for RealtimeSTT)
+        if self.cfg.stt.engine == "realtimestt":
+            whisper_menu = rumps.MenuItem(f"Modell: {self.cfg.stt.model}")
+            for m in WHISPER_MODELS:
+                check = "✓ " if m == self.cfg.stt.model else "  "
+                whisper_menu[m] = rumps.MenuItem(f"{check}{m}", callback=self._set_whisper_model)
+            stt_section["whisper"] = whisper_menu
+
+        # Language
+        lang_menu = rumps.MenuItem(f"Sprache: {LANGUAGES.get(self.cfg.stt.language, self.cfg.stt.language)}")
+        for code, name in LANGUAGES.items():
+            check = "✓ " if code == self.cfg.stt.language else "  "
+            lang_menu[code] = rumps.MenuItem(f"{check}{name}", callback=self._set_language)
+        stt_section["language"] = lang_menu
+
+        settings["stt"] = stt_section
+
         settings.update([None])
 
-        # Whisper model submenu
-        whisper_menu = rumps.MenuItem(f"Whisper: {self.cfg.stt.model}")
-        for m in WHISPER_MODELS:
-            item = rumps.MenuItem(
-                f"{'✓ ' if m == self.cfg.stt.model else '  '}{m}", callback=self._set_whisper_model
-            )
-            item.title = f"{'✓ ' if m == self.cfg.stt.model else '  '}{m}"
-            whisper_menu[m] = item
-        settings["whisper"] = whisper_menu
+        # ── Sprachausgabe (TTS) ───────────────────────────────────
+        tts_section = rumps.MenuItem("🔊 Sprachausgabe")
 
-        # Language submenu
-        lang_menu = rumps.MenuItem(f"Sprache: {self.cfg.stt.language}")
-        for code, name in LANGUAGES.items():
-            item = rumps.MenuItem(
-                f"{'✓ ' if code == self.cfg.stt.language else '  '}{name}",
-                callback=self._set_language,
-            )
-            lang_menu[code] = item
-        settings["language"] = lang_menu
+        # Engine
+        for engine_id, label in TTS_ENGINES.items():
+            check = "✓ " if engine_id == self.cfg.tts.engine else "  "
+            item = rumps.MenuItem(f"{check}{label}", callback=self._set_tts_engine)
+            tts_section[engine_id] = item
 
-        # TTS rate
-        settings[f"Sprechgeschwindigkeit: {self.cfg.tts.rate} wpm"] = rumps.MenuItem(
-            f"Sprechgeschwindigkeit: {self.cfg.tts.rate} wpm", callback=self._set_tts_rate
+        tts_section.update([None])
+
+        # Voice selection (engine-specific)
+        if self.cfg.tts.engine == "piper":
+            voice_menu = rumps.MenuItem(f"Stimme: {self.cfg.tts.piper_voice}")
+            for voice_id, label in PIPER_VOICES.items():
+                check = "✓ " if voice_id == self.cfg.tts.piper_voice else "  "
+                voice_menu[voice_id] = rumps.MenuItem(f"{check}{label}", callback=self._set_piper_voice)
+            tts_section["voice"] = voice_menu
+
+        elif self.cfg.tts.engine == "elevenlabs":
+            from jarvis.pipeline.tts.elevenlabs_tts import ELEVENLABS_VOICES
+
+            current_el = self.cfg.tts.elevenlabs_voice
+            current_label = ELEVENLABS_VOICES.get(current_el, {}).get("label", current_el)
+            voice_menu = rumps.MenuItem(f"Stimme: {current_label}")
+            for voice_id, info in ELEVENLABS_VOICES.items():
+                check = "✓ " if voice_id == current_el else "  "
+                voice_menu[voice_id] = rumps.MenuItem(
+                    f"{check}{info['label']}", callback=self._set_elevenlabs_voice
+                )
+            voice_menu["custom"] = rumps.MenuItem(
+                "🎤 Eigene Voice-ID...", callback=self._set_elevenlabs_custom_voice
+            )
+            tts_section["voice"] = voice_menu
+
+        # Speed + mic mute
+        tts_section[f"Geschwindigkeit: {self.cfg.tts.rate} wpm"] = rumps.MenuItem(
+            f"Geschwindigkeit: {self.cfg.tts.rate} wpm", callback=self._set_tts_rate
         )
         mute_check = "✓ " if self.cfg.tts.mute_mic_during_speech else "  "
-        settings[f"{mute_check}Mic stummschalten bei Sprache"] = rumps.MenuItem(
-            f"{mute_check}Mic stummschalten bei Sprache", callback=self._toggle_mic_mute
+        tts_section[f"{mute_check}Mic stumm bei Sprache"] = rumps.MenuItem(
+            f"{mute_check}Mic stumm bei Sprache", callback=self._toggle_mic_mute
         )
+
+        settings["tts"] = tts_section
+
         settings.update([None])
 
-        # Claude model submenu
-        current_label = CLAUDE_MODELS.get(self.cfg.agent.model, self.cfg.agent.model)
-        claude_menu = rumps.MenuItem(f"Claude: {current_label}")
-        for model_id, label in CLAUDE_MODELS.items():
-            item = rumps.MenuItem(
-                f"{'✓ ' if model_id == self.cfg.agent.model else '  '}{label}",
-                callback=self._set_claude_model,
-            )
-            claude_menu[model_id] = item
-        settings["claude"] = claude_menu
+        # ── Agent ─────────────────────────────────────────────────
+        agent_section = rumps.MenuItem("🤖 Agent")
 
-        settings[f"Budget: ${self.cfg.agent.max_budget_usd:.2f}"] = rumps.MenuItem(
+        current_label = CLAUDE_MODELS.get(self.cfg.agent.model, self.cfg.agent.model)
+        claude_menu = rumps.MenuItem(f"Modell: {current_label}")
+        for model_id, label in CLAUDE_MODELS.items():
+            check = "✓ " if model_id == self.cfg.agent.model else "  "
+            claude_menu[model_id] = rumps.MenuItem(f"{check}{label}", callback=self._set_claude_model)
+        agent_section["claude"] = claude_menu
+
+        agent_section[f"Budget: ${self.cfg.agent.max_budget_usd:.2f}"] = rumps.MenuItem(
             f"Budget: ${self.cfg.agent.max_budget_usd:.2f}", callback=self._set_budget
         )
-        settings[f"Max. Runden: {self.cfg.agent.max_turns}"] = rumps.MenuItem(
+        agent_section[f"Max. Runden: {self.cfg.agent.max_turns}"] = rumps.MenuItem(
             f"Max. Runden: {self.cfg.agent.max_turns}", callback=self._set_max_turns
         )
         cost_check = "✓ " if self.cfg.logging.cost_tracking else "  "
-        settings[f"{cost_check}Kosten-Tracking"] = rumps.MenuItem(
+        agent_section[f"{cost_check}Kosten-Tracking"] = rumps.MenuItem(
             f"{cost_check}Kosten-Tracking", callback=self._toggle_cost_tracking
         )
+
+        settings["agent"] = agent_section
+
         settings.update([None])
 
-        # Memory settings
+        # ── Session ───────────────────────────────────────────────
+        session_section = rumps.MenuItem("💬 Session")
+        session_section[f"Wake Word: {self.cfg.session.wake_word}"] = rumps.MenuItem(
+            f"Wake Word: {self.cfg.session.wake_word}", callback=self._set_wake_word
+        )
+        session_section[f"Stop Word: {self.cfg.session.stop_word}"] = rumps.MenuItem(
+            f"Stop Word: {self.cfg.session.stop_word}", callback=self._set_stop_word
+        )
+        session_section[f"Exit-Phrase: {self.cfg.session.exit_phrase}"] = rumps.MenuItem(
+            f"Exit-Phrase: {self.cfg.session.exit_phrase}", callback=self._set_exit_phrase
+        )
+        settings["session"] = session_section
+
+        # ── Memory ────────────────────────────────────────────────
+        mem_section = rumps.MenuItem("🧠 Memory")
         mem_path = self.cfg.memory.path
         short_path = mem_path.replace(str(Path.home()), "~")
-        settings[f"📂 Memory-Pfad: {short_path}"] = rumps.MenuItem(
-            f"📂 Memory-Pfad: {short_path}", callback=self._set_memory_path
+        mem_section[f"Pfad: {short_path}"] = rumps.MenuItem(
+            f"Pfad: {short_path}", callback=self._set_memory_path
         )
         files_label = ", ".join(self.cfg.memory.files) if self.cfg.memory.files else "(keine)"
-        settings[f"📄 Memory-Dateien: {files_label}"] = rumps.MenuItem(
-            f"📄 Memory-Dateien: {files_label}", callback=self._set_memory_files
+        mem_section[f"Dateien: {files_label}"] = rumps.MenuItem(
+            f"Dateien: {files_label}", callback=self._set_memory_files
         )
+        settings["memory"] = mem_section
 
         return settings
 
     # ── Pipeline ───────────────────────────────────────────────────
+
+    def _restart_pipeline(self) -> None:
+        """Stop current pipeline and start a new one with updated config."""
+        log.info("Restarting pipeline with new settings...")
+        self._cleanup()
+        self._pipeline = None
+        self._pipeline_started = False
+        self._start_pipeline()
 
     def _start_pipeline(self) -> None:
         """Start VoicePipeline in background thread."""
@@ -237,7 +308,6 @@ class JarvisMenuBarApp(rumps.App):
             import os
 
             from jarvis.agent.core import JarvisAgent
-            from jarvis.pipeline.tts.macos_say import MacOSSayEngine
             from jarvis.pipeline.wake.whisper_wake import WhisperWakeEngine
 
             # Inject API keys from Keychain into environment
@@ -258,7 +328,27 @@ class JarvisMenuBarApp(rumps.App):
                 from jarvis.pipeline.stt.realtimestt import RealtimeSTTEngine
 
                 stt = RealtimeSTTEngine(stt_config=self.cfg.stt, vad_config=self.cfg.vad)
-            tts = MacOSSayEngine(rate=self.cfg.tts.rate, voice=self.cfg.tts.voice)
+
+            # Select TTS engine
+            if self.cfg.tts.engine == "elevenlabs":
+                from jarvis.pipeline.tts.elevenlabs_tts import ElevenLabsTTSEngine
+
+                el_key = get_elevenlabs_key() or ""
+                tts = ElevenLabsTTSEngine(
+                    api_key=el_key,
+                    voice=self.cfg.tts.elevenlabs_voice,
+                    model=self.cfg.tts.elevenlabs_model,
+                )
+                log.info(f"Using ElevenLabs TTS ({self.cfg.tts.elevenlabs_voice})")
+            elif self.cfg.tts.engine == "piper":
+                from jarvis.pipeline.tts.piper import PiperTTSEngine
+
+                tts = PiperTTSEngine(voice=self.cfg.tts.piper_voice, rate=self.cfg.tts.rate)
+                log.info(f"Using Piper TTS ({self.cfg.tts.piper_voice})")
+            else:
+                from jarvis.pipeline.tts.macos_say import MacOSSayEngine
+
+                tts = MacOSSayEngine(rate=self.cfg.tts.rate, voice=self.cfg.tts.voice)
             wake = WhisperWakeEngine(self.cfg.wake_word.variants)
             agent = JarvisAgent(self.cfg)
 
@@ -310,6 +400,7 @@ class JarvisMenuBarApp(rumps.App):
                 PipelineState.LISTENING: "🟢 Lauscht...",
                 PipelineState.PROCESSING: "🧠 Denkt...",
                 PipelineState.SPEAKING: "🔵 Spricht...",
+                PipelineState.PERMISSION_PENDING: "🔐 Wartet auf Genehmigung...",
             }
             self._update_status(labels.get(state, ""))
         except Exception:
@@ -374,10 +465,7 @@ class JarvisMenuBarApp(rumps.App):
                 self.cfg.stt.engine = engine_id
                 self.cfg.save()
                 self._rebuild_menu_labels()
-                rumps.alert(
-                    "STT Engine geändert",
-                    f"Wechsel zu {label}.\nBitte App neu starten für die Änderung.",
-                )
+                threading.Thread(target=self._restart_pipeline, daemon=True).start()
                 break
 
     def _set_wake_word(self, _) -> None:
@@ -504,6 +592,71 @@ class JarvisMenuBarApp(rumps.App):
                 target=self._pipeline.agent.reconfigure, daemon=True
             ).start()
             log.info("Agent SDK restarting with new config...")
+
+    def _set_tts_engine(self, sender) -> None:
+        for engine_id, label in TTS_ENGINES.items():
+            if label in sender.title:
+                if engine_id == "elevenlabs" and not has_elevenlabs_key():
+                    rumps.alert(
+                        "ElevenLabs API Key fehlt",
+                        "Bitte zuerst einen ElevenLabs API Key setzen.",
+                    )
+                    return
+                self.cfg.tts.engine = engine_id
+                self.cfg.save()
+                self._rebuild_menu_labels()
+                threading.Thread(target=self._restart_pipeline, daemon=True).start()
+                break
+
+    def _set_piper_voice(self, sender) -> None:
+        for voice_id, label in PIPER_VOICES.items():
+            if label in sender.title:
+                self.cfg.tts.piper_voice = voice_id
+                self.cfg.save()
+                self._rebuild_menu_labels()
+                threading.Thread(target=self._restart_pipeline, daemon=True).start()
+                break
+
+    def _set_elevenlabs_key(self, _) -> None:
+        response = rumps.Window(
+            message="ElevenLabs API Key eingeben:\n(https://elevenlabs.io/app/settings/api-keys)",
+            title="🔑 ElevenLabs API Key",
+            secure=True,
+            ok="Speichern",
+            cancel="Abbrechen",
+        ).run()
+        if response.clicked and response.text.strip():
+            if set_elevenlabs_key(response.text.strip()):
+                rumps.alert(
+                    "ElevenLabs Key gespeichert",
+                    "Key wurde sicher im Keychain hinterlegt.",
+                )
+                self._rebuild_menu_labels()
+
+    def _set_elevenlabs_voice(self, sender) -> None:
+        from jarvis.pipeline.tts.elevenlabs_tts import ELEVENLABS_VOICES
+
+        for voice_id, info in ELEVENLABS_VOICES.items():
+            if info["label"] in sender.title:
+                self.cfg.tts.elevenlabs_voice = voice_id
+                self.cfg.save()
+                self._rebuild_menu_labels()
+                threading.Thread(target=self._restart_pipeline, daemon=True).start()
+                break
+
+    def _set_elevenlabs_custom_voice(self, _) -> None:
+        response = rumps.Window(
+            message="ElevenLabs Voice-ID eingeben:\n(findest du unter Voices → deine Stimme → Voice ID)",
+            title="🎤 Eigene Voice-ID",
+            default_text=self.cfg.tts.elevenlabs_voice,
+            ok="Speichern",
+            cancel="Abbrechen",
+        ).run()
+        if response.clicked and response.text.strip():
+            self.cfg.tts.elevenlabs_voice = response.text.strip()
+            self.cfg.save()
+            self._rebuild_menu_labels()
+            threading.Thread(target=self._restart_pipeline, daemon=True).start()
 
     def _toggle_mic_mute(self, _) -> None:
         self.cfg.tts.mute_mic_during_speech = not self.cfg.tts.mute_mic_during_speech

@@ -2,6 +2,8 @@
 
 Uses Deepgram's Nova-3 model via WebSocket for low-latency, high-accuracy
 speech-to-text. Requires a DEEPGRAM_API_KEY environment variable.
+
+Tested with deepgram-sdk 6.x.
 """
 
 from __future__ import annotations
@@ -24,9 +26,12 @@ SAMPLE_RATE = 16000
 CHANNELS = 1
 CHUNK_SIZE = 4096
 
+# Pre-built silence frame (zeros = silence for int16 PCM)
+_SILENCE = b"\x00" * (CHUNK_SIZE * 2)  # 2 bytes per sample (int16)
+
 
 class DeepgramSTTEngine(STTEngine):
-    """STTEngine implementation using Deepgram real-time streaming API."""
+    """STTEngine implementation using Deepgram real-time streaming API (SDK v6)."""
 
     def __init__(self, stt_config: STTConfig, vad_config: VADConfig) -> None:
         self._stt_config = stt_config
@@ -34,7 +39,6 @@ class DeepgramSTTEngine(STTEngine):
         self._running = False
         self._muted = False
         self._connection = None
-        self._microphone = None
         self._audio_thread: threading.Thread | None = None
 
     async def start(
@@ -43,11 +47,9 @@ class DeepgramSTTEngine(STTEngine):
         on_ready: Union[Callable[[], Awaitable[None]], Callable[[], None], None] = None,
     ) -> None:
         """Start Deepgram streaming STT with microphone input."""
-        from deepgram import (
-            DeepgramClient,
-            LiveOptions,
-            LiveTranscriptionEvents,
-        )
+        from deepgram import DeepgramClient
+        from deepgram.core.events import EventType
+        from deepgram.listen.v1.types.listen_v1results import ListenV1Results
 
         api_key = os.environ.get("DEEPGRAM_API_KEY", "")
         if not api_key:
@@ -56,55 +58,34 @@ class DeepgramSTTEngine(STTEngine):
                 "Get a key at https://console.deepgram.com"
             )
 
-        client = DeepgramClient(api_key)
-        self._connection = client.listen.live.v("1")
-
-        # Event handlers
-        def on_open(self_dg, open_event, **kwargs):
-            log.info("Deepgram connection opened")
-
-        def on_message(self_dg, result, **kwargs):
-            try:
-                transcript = result.channel.alternatives[0].transcript
-                if transcript and result.is_final:
-                    on_text(transcript)
-            except (IndexError, AttributeError) as e:
-                log.debug(f"Deepgram message parse: {e}")
-
-        def on_error(self_dg, error, **kwargs):
-            log.error(f"Deepgram error: {error}")
-
-        def on_close(self_dg, close_event, **kwargs):
-            log.info("Deepgram connection closed")
-
-        self._connection.on(LiveTranscriptionEvents.Open, on_open)
-        self._connection.on(LiveTranscriptionEvents.Transcript, on_message)
-        self._connection.on(LiveTranscriptionEvents.Error, on_error)
-        self._connection.on(LiveTranscriptionEvents.Close, on_close)
-
-        # Deepgram model selection
+        # Deepgram model selection — map whisper names to nova-3
         model = self._stt_config.model
         if model in ("tiny", "base", "small", "medium", "large"):
-            # User has a whisper model name — use Deepgram's best
             model = "nova-3"
 
-        options = LiveOptions(
+        self._client = DeepgramClient(api_key=api_key)
+        self._on_text = on_text
+
+        # v6 SDK: connect returns a context manager yielding V1SocketClient
+        endpointing_ms = int(self._vad_config.post_speech_silence * 1000)
+        # Note: v6 SDK has a bug serializing booleans (smart_format, punctuate)
+        # into WebSocket query params — pass them as strings via extra params
+        self._conn_ctx = self._client.listen.v1.connect(
             model=model,
             language=self._stt_config.language,
-            smart_format=True,
             encoding="linear16",
             sample_rate=SAMPLE_RATE,
-            channels=CHANNELS,
-            interim_results=False,
-            utterance_end_ms=str(int(self._vad_config.post_speech_silence * 1000)),
-            vad_events=True,
+            endpointing=endpointing_ms,
+            request_options={
+                "additional_query_parameters": {
+                    "punctuate": "true",
+                    "smart_format": "true",
+                },
+            },
         )
 
-        started = self._connection.start(options)
-        if not started:
-            raise RuntimeError("Failed to start Deepgram connection")
-
         self._running = True
+
         log.info(f"Deepgram STT started (model: {model}, lang: {self._stt_config.language})")
 
         if on_ready:
@@ -112,11 +93,53 @@ class DeepgramSTTEngine(STTEngine):
             if inspect.isawaitable(result):
                 await result
 
-        # Start microphone capture in background thread
-        await asyncio.to_thread(self._capture_audio)
+        # Run the blocking WebSocket + mic capture in a background thread
+        await asyncio.to_thread(self._run_connection)
 
-    def _capture_audio(self) -> None:
-        """Capture microphone audio and send to Deepgram. Runs in a thread."""
+    def _run_connection(self) -> None:
+        """Run Deepgram WebSocket connection + mic capture. Blocks until stopped."""
+        from deepgram.core.events import EventType
+        from deepgram.listen.v1.types.listen_v1results import ListenV1Results
+
+        with self._conn_ctx as socket_client:
+            self._connection = socket_client
+
+            # Register event handler for transcription results
+            def on_message(message):
+                if isinstance(message, ListenV1Results):
+                    try:
+                        transcript = message.channel.alternatives[0].transcript
+                        if transcript and message.is_final:
+                            self._on_text(transcript)
+                    except (IndexError, AttributeError) as e:
+                        log.debug(f"Deepgram message parse: {e}")
+
+            socket_client.on(EventType.MESSAGE, on_message)
+            socket_client.on(EventType.ERROR, lambda e: log.error(f"Deepgram error: {e}"))
+
+            # Start listening thread (processes incoming WebSocket messages)
+            listen_thread = threading.Thread(
+                target=socket_client.start_listening, daemon=True
+            )
+            listen_thread.start()
+
+            # Capture microphone audio
+            self._capture_audio(socket_client)
+
+            # Clean shutdown
+            try:
+                socket_client.send_close_stream()
+            except Exception:
+                pass
+
+        self._connection = None
+
+    def _capture_audio(self, socket_client) -> None:
+        """Capture microphone audio and send to Deepgram.
+
+        When muted, sends silence frames instead of real audio to keep the
+        WebSocket connection alive (Deepgram closes idle connections after ~60s).
+        """
         import pyaudio
 
         pa = pyaudio.PyAudio()
@@ -129,13 +152,17 @@ class DeepgramSTTEngine(STTEngine):
                 frames_per_buffer=CHUNK_SIZE,
             )
 
-            log.debug("Microphone stream opened for Deepgram")
+            log.info("⚙️ Deepgram mic capture started")
 
             while self._running:
                 try:
                     data = stream.read(CHUNK_SIZE, exception_on_overflow=False)
-                    if not self._muted and self._connection:
-                        self._connection.send(data)
+                    if self._connection:
+                        if not self._muted:
+                            socket_client.send_media(data)
+                        else:
+                            # Send silence to keep WebSocket alive
+                            socket_client.send_media(_SILENCE)
                 except OSError as e:
                     if self._running:
                         log.warning(f"Audio capture error: {e}")
@@ -158,7 +185,7 @@ class DeepgramSTTEngine(STTEngine):
         self._running = False
         if self._connection:
             try:
-                self._connection.finish()
+                self._connection.send_close_stream()
             except Exception as e:
                 log.warning(f"Deepgram close error: {e}")
             self._connection = None

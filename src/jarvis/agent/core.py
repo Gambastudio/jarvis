@@ -24,6 +24,12 @@ from claude_agent_sdk import (
     TextBlock,
     ToolUseBlock,
 )
+from claude_agent_sdk.types import (
+    PermissionResult,
+    PermissionResultAllow,
+    PermissionResultDeny,
+    ToolPermissionContext,
+)
 
 from jarvis.config import JarvisConfig
 from jarvis.utils.cost_tracker import CostTracker
@@ -71,12 +77,21 @@ class JarvisAgent:
         "When in doubt, ask first."
     )
 
+    # Tools that are safe to auto-approve (read-only, no side effects)
+    _SAFE_TOOLS = {
+        "Read", "Glob", "Grep", "WebSearch", "WebFetch",
+        "TodoRead", "TodoWrite", "Agent",
+    }
+
     def __init__(self, config: JarvisConfig) -> None:
         self.config = config
         self.cost_tracker = CostTracker()
         self._client: ClaudeSDKClient | None = None
         self._session_active = False  # True after first ask() in a session
         self._progress_callback: Callable[[str], None] | None = None
+        # Voice permission callback — set by the orchestrator.
+        # Signature: (tool_name: str, description: str) -> bool
+        self.permission_handler: Callable[[str, str], bool] | None = None
 
         # Dedicated event loop — lives for the lifetime of this agent.
         self._loop = asyncio.new_event_loop()
@@ -131,6 +146,62 @@ class JarvisAgent:
             f"- Hostname: {socket.gethostname()}"
         )
 
+    def _describe_tool_use(self, tool_name: str, tool_input: dict) -> str:
+        """Build a human-readable German description of a tool use for voice."""
+        if tool_name == "Bash":
+            cmd = tool_input.get("command", "unbekannter Befehl")
+            # Truncate long commands
+            if len(cmd) > 80:
+                cmd = cmd[:80] + "..."
+            return f"Ich möchte folgenden Befehl ausführen: {cmd}. Soll ich?"
+        elif tool_name == "Write":
+            path = tool_input.get("file_path", "unbekannte Datei")
+            return f"Ich möchte die Datei {Path(path).name} erstellen. Soll ich?"
+        elif tool_name == "Edit":
+            path = tool_input.get("file_path", "unbekannte Datei")
+            return f"Ich möchte die Datei {Path(path).name} bearbeiten. Soll ich?"
+        elif tool_name == "NotebookEdit":
+            path = tool_input.get("notebook_path", "unbekanntes Notebook")
+            return f"Ich möchte das Notebook {Path(path).name} bearbeiten. Soll ich?"
+        else:
+            return f"Ich möchte das Tool {tool_name} verwenden. Soll ich?"
+
+    async def _can_use_tool(
+        self,
+        tool_name: str,
+        tool_input: dict,
+        context: ToolPermissionContext,
+    ) -> PermissionResult:
+        """Voice-based tool permission callback.
+
+        Auto-approves safe tools (Read, Grep, etc.). For dangerous tools
+        (Bash, Write, Edit), asks the user via TTS and waits for voice response.
+        """
+        # Auto-approve safe/read-only tools
+        if tool_name in self._SAFE_TOOLS:
+            return PermissionResultAllow()
+
+        # No permission handler wired up → deny (safer than auto-approve)
+        if not self.permission_handler:
+            log.warning(f"No permission handler — denying {tool_name}")
+            return PermissionResultDeny(message="Keine Sprachgenehmigung möglich")
+
+        description = self._describe_tool_use(tool_name, tool_input)
+
+        # Call the voice permission handler (blocks until user responds)
+        # Run in executor since it blocks on threading.Event
+        loop = asyncio.get_running_loop()
+        granted = await loop.run_in_executor(
+            None, self.permission_handler, tool_name, description
+        )
+
+        if granted:
+            return PermissionResultAllow()
+        else:
+            return PermissionResultDeny(
+                message="Vom Benutzer per Sprache abgelehnt"
+            )
+
     def _build_options(self) -> ClaudeAgentOptions:
         """Build ClaudeAgentOptions — includes memory in system prompt."""
         system_prompt = self._VOICE_SYSTEM_PROMPT
@@ -150,6 +221,7 @@ class JarvisAgent:
             permission_mode=self.config.agent.permission_mode,
             thinking=self.config.agent.thinking,
             system_prompt=system_prompt,
+            can_use_tool=self._can_use_tool,
         )
         if self.config.mcp_servers:
             opts.mcp_servers = self.config.mcp_servers

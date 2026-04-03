@@ -31,6 +31,7 @@ class PipelineState(Enum):
     LISTENING = "listening"
     PROCESSING = "processing"
     SPEAKING = "speaking"
+    PERMISSION_PENDING = "permission_pending"
 
 
 class VoicePipeline:
@@ -67,6 +68,10 @@ class VoicePipeline:
         self.on_exit = on_exit
         self._state = PipelineState.IDLE
         self._loop: asyncio.AbstractEventLoop | None = None
+        # Voice permission flow
+        self._permission_event = threading.Event()
+        self._permission_granted = False
+        self._prev_state_before_permission: PipelineState | None = None
 
     @property
     def state(self) -> PipelineState:
@@ -89,6 +94,9 @@ class VoicePipeline:
         SystemExit or KeyboardInterrupt.
         """
         self._loop = asyncio.get_running_loop()
+        self._command_lock = threading.Lock()
+        # Wire voice permission: agent asks → pipeline speaks & listens
+        self.agent.permission_handler = self.ask_permission
         while True:
             try:
                 self.state = PipelineState.IDLE
@@ -124,13 +132,15 @@ class VoicePipeline:
     async def _on_stt_ready(self) -> None:
         """Called once the STT recorder is fully initialised and listening."""
         log.info("All systems ready")
-        await self._speak("Jarvis online.")
+        self._say_direct("Jarvis online.")
 
     def _on_transcription(self, text: str) -> None:
         """Route transcription based on current state.
 
-        Called from the STT engine's background thread. Uses
-        run_coroutine_threadsafe to bridge sync→async for agent and TTS calls.
+        Called from the STT engine's background thread. Long-running operations
+        (_handle_idle, _handle_listening) are dispatched to a separate thread
+        so the STT callback returns immediately — this prevents Deepgram's
+        WebSocket listener from blocking and timing out.
         """
         text = text.strip()
         if not text or len(text) < 2:
@@ -140,13 +150,79 @@ class VoicePipeline:
 
         match self.state:
             case PipelineState.IDLE:
-                self._handle_idle(text)
+                threading.Thread(
+                    target=self._handle_idle, args=(text,), daemon=True
+                ).start()
             case PipelineState.LISTENING:
-                self._handle_listening(text)
+                threading.Thread(
+                    target=self._handle_listening, args=(text,), daemon=True
+                ).start()
             case PipelineState.PROCESSING:
                 self._handle_processing(text)
             case PipelineState.SPEAKING:
                 self._handle_speaking(text)
+            case PipelineState.PERMISSION_PENDING:
+                self._handle_permission_pending(text)
+
+    # ── Voice Permission Flow ─────────────────────────────────────────────────
+
+    # Words recognized as approval
+    _APPROVE_WORDS = {"ja", "yes", "ok", "okay", "mach", "mach das", "tu es", "go", "klar",
+                      "jawohl", "bitte", "gerne", "sicher", "auf jeden fall", "genau"}
+    # Words recognized as denial
+    _DENY_WORDS = {"nein", "no", "nicht", "stopp", "stop", "abbruch", "abbrechen",
+                   "cancel", "halt", "nee", "lass", "lass das", "lieber nicht"}
+
+    def ask_permission(self, tool_name: str, description: str) -> bool:
+        """Ask the user for tool permission via voice. Blocks until answered.
+
+        Called from the agent's can_use_tool callback (runs in agent thread).
+        Speaks the question, waits for STT to deliver Ja/Nein, returns result.
+        """
+        self._permission_event.clear()
+        self._permission_granted = False
+        self._prev_state_before_permission = self._state
+        self.state = PipelineState.PERMISSION_PENDING
+
+        # Speak the permission question
+        self._say_direct(description)
+        log.info(f"🔐 Warte auf Genehmigung: {tool_name}")
+
+        # Wait for user response (timeout after 30s → deny)
+        answered = self._permission_event.wait(timeout=30)
+        if not answered:
+            log.info("🔐 Keine Antwort — Genehmigung verweigert (Timeout)")
+            self._say_direct("Keine Antwort, ich überspringe das.")
+
+        # Restore previous state
+        self.state = self._prev_state_before_permission or PipelineState.PROCESSING
+        self._prev_state_before_permission = None
+
+        result = self._permission_granted if answered else False
+        log.info(f"🔐 Genehmigung: {'✓ Erlaubt' if result else '✗ Verweigert'}")
+        return result
+
+    def _handle_permission_pending(self, text: str) -> None:
+        """Handle transcription during PERMISSION_PENDING — listen for Ja/Nein."""
+        import re
+        normalized = re.sub(r"[.,!?;:\-]", " ", text.lower()).strip()
+        normalized = re.sub(r"\s+", " ", normalized)
+
+        if any(normalized == w or normalized.startswith(w + " ") for w in self._APPROVE_WORDS):
+            log.info(f'🔐 Genehmigt: "{text}"')
+            self._permission_granted = True
+            self._permission_event.set()
+            return
+
+        if any(normalized == w or normalized.startswith(w + " ") for w in self._DENY_WORDS):
+            log.info(f'🔐 Verweigert: "{text}"')
+            self._permission_granted = False
+            self._permission_event.set()
+            return
+
+        # Unrecognized — ask again
+        log.info(f'🔐 Nicht erkannt: "{text}" — frage erneut')
+        self._say_direct("Bitte antworte mit Ja oder Nein.")
 
     # Words that cancel a running agent task or interrupt speech
     _CANCEL_WORDS = {"abbruch", "abbrechen", "stopp", "stop", "ende", "cancel", "halt"}
@@ -229,14 +305,22 @@ class VoicePipeline:
         self._process_command(text)
 
     def _say_direct(self, text: str) -> None:
-        """Speak text directly via subprocess, with mic muted to avoid feedback."""
-        import subprocess
+        """Speak text directly, with mic muted to avoid feedback.
+
+        Uses the TTS engine's sync method if available, otherwise falls back
+        to macOS `say` command.
+        """
         self.stt.mute()
         try:
-            subprocess.run(
-                ["say", "-r", str(self.config.tts.rate), text],
-                timeout=10,
-            )
+            if hasattr(self.tts, '_speak_sync'):
+                # Piper TTS has a sync method
+                self.tts._speak_sync(text)
+            else:
+                import subprocess
+                subprocess.run(
+                    ["say", "-r", str(self.config.tts.rate), text],
+                    timeout=10,
+                )
         except Exception as e:
             log.warning(f"Direct say failed: {e}")
         finally:
@@ -247,7 +331,20 @@ class VoicePipeline:
 
         Gives periodic spoken feedback while the agent is processing,
         so the user knows Jarvis is still working.
+
+        Thread-safe: uses a lock to prevent concurrent agent calls when
+        multiple transcriptions arrive in quick succession.
         """
+        if not self._command_lock.acquire(blocking=False):
+            log.debug("Ignoring overlapping command while agent is busy")
+            return
+        try:
+            self._process_command_inner(text)
+        finally:
+            self._command_lock.release()
+
+    def _process_command_inner(self, text: str) -> None:
+        """Inner command processing (called under lock)."""
         self.state = PipelineState.PROCESSING
         self._processing_done = False
 
@@ -306,14 +403,13 @@ class VoicePipeline:
 
         if should_mute:
             self.stt.mute()
-            if len(text) > 80:
-                # Long text: unmute mic after 1.5s so user can interrupt
-                async def _delayed_unmute() -> None:
-                    await asyncio.sleep(1.5)
-                    if self.state == PipelineState.SPEAKING:
-                        self.stt.unmute()
+            # Unmute mic after short delay so user can interrupt or say stop word
+            async def _delayed_unmute() -> None:
+                await asyncio.sleep(1.0)
+                if self.state == PipelineState.SPEAKING:
+                    self.stt.unmute()
 
-                asyncio.ensure_future(_delayed_unmute())
+            asyncio.ensure_future(_delayed_unmute())
 
         await self.tts.speak(text)
         if should_mute:

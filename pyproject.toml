@@ -37,13 +37,14 @@ dependencies = [
 stt = ["RealtimeSTT"]
 stt-deepgram = ["deepgram-sdk>=3.0", "pyaudio>=0.2.14"]
 tts-piper = ["piper-tts"]
+tts-elevenlabs = ["elevenlabs>=2.0"]
 macos = ["rumps", "pyobjc-framework-Cocoa"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio",
     "ruff>=0.4",
 ]
-all = ["jarvis-voice[stt,stt-deepgram,tts-piper,macos,dev]"]
+all = ["jarvis-voice[stt,stt-deepgram,tts-piper,tts-elevenlabs,macos,dev]"]
 
 [project.scripts]
 jarvis = "jarvis.cli:app"

@@ -60,3 +60,21 @@ def get_deepgram_key() -> str | None:
 def has_deepgram_key() -> bool:
     """Check whether a Deepgram API key is stored."""
     return has_api_key(_DEEPGRAM_ACCOUNT)
+
+
+_ELEVENLABS_ACCOUNT = "elevenlabs-api-key"
+
+
+def set_elevenlabs_key(api_key: str) -> bool:
+    """Store ElevenLabs API key in macOS Keychain."""
+    return set_api_key(api_key, _ELEVENLABS_ACCOUNT)
+
+
+def get_elevenlabs_key() -> str | None:
+    """Retrieve ElevenLabs API key from macOS Keychain."""
+    return get_api_key(_ELEVENLABS_ACCOUNT)
+
+
+def has_elevenlabs_key() -> bool:
+    """Check whether an ElevenLabs API key is stored."""
+    return has_api_key(_ELEVENLABS_ACCOUNT)

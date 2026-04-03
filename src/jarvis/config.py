@@ -63,6 +63,8 @@ class TTSConfig:
     rate: int = 200
     voice: str | None = None
     piper_voice: str = "de_DE-thorsten-high"
+    elevenlabs_voice: str = "daniel"
+    elevenlabs_model: str = "eleven_multilingual_v2"
     mute_mic_during_speech: bool = True
 
 
