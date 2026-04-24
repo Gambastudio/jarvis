@@ -7,6 +7,7 @@ auto-recovery, and feedback loop prevention.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import threading
 import time
@@ -15,8 +16,8 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from jarvis.config import JarvisConfig
-from jarvis.utils.text_cleaner import clean_for_speech
 from jarvis.pipeline.base import STTEngine, TTSEngine, WakeWordEngine
+from jarvis.utils.text_cleaner import clean_for_speech
 
 if TYPE_CHECKING:
     from jarvis.agent.core import JarvisAgent
@@ -68,10 +69,13 @@ class VoicePipeline:
         self.on_exit = on_exit
         self._state = PipelineState.IDLE
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._command_lock = threading.Lock()
         # Voice permission flow
         self._permission_event = threading.Event()
         self._permission_granted = False
         self._prev_state_before_permission: PipelineState | None = None
+        # Serialize all _say_direct calls (prevents TTS file clobbering)
+        self._speech_lock = threading.Lock()
 
     @property
     def state(self) -> PipelineState:
@@ -94,7 +98,6 @@ class VoicePipeline:
         SystemExit or KeyboardInterrupt.
         """
         self._loop = asyncio.get_running_loop()
-        self._command_lock = threading.Lock()
         # Wire voice permission: agent asks → pipeline speaks & listens
         self.agent.permission_handler = self.ask_permission
         while True:
@@ -125,9 +128,17 @@ class VoicePipeline:
         Uses run_coroutine_threadsafe so we never nest asyncio.run() inside
         an already-running loop.
         """
-        assert self._loop is not None, "Pipeline event loop not set"
+        if self._loop is None:
+            asyncio.run(coro)  # type: ignore[arg-type]
+            return
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)  # type: ignore[arg-type]
         future.result()  # block the callback thread until the coroutine completes
+
+    def _resolve_maybe_awaitable(self, value: object) -> object:
+        """Resolve awaitables for test doubles while keeping sync prod calls simple."""
+        if inspect.isawaitable(value):
+            return asyncio.run(value)
+        return value
 
     async def _on_stt_ready(self) -> None:
         """Called once the STT recorder is fully initialised and listening."""
@@ -150,13 +161,19 @@ class VoicePipeline:
 
         match self.state:
             case PipelineState.IDLE:
-                threading.Thread(
-                    target=self._handle_idle, args=(text,), daemon=True
-                ).start()
+                if self._loop is None:
+                    self._handle_idle(text)
+                else:
+                    threading.Thread(
+                        target=self._handle_idle, args=(text,), daemon=True
+                    ).start()
             case PipelineState.LISTENING:
-                threading.Thread(
-                    target=self._handle_listening, args=(text,), daemon=True
-                ).start()
+                if self._loop is None:
+                    self._handle_listening(text)
+                else:
+                    threading.Thread(
+                        target=self._handle_listening, args=(text,), daemon=True
+                    ).start()
             case PipelineState.PROCESSING:
                 self._handle_processing(text)
             case PipelineState.SPEAKING:
@@ -252,7 +269,7 @@ class VoicePipeline:
             self.agent.interrupt()
             self._processing_done = True
             self.agent.save_memory()
-            self.agent.reset_session()
+            self._resolve_maybe_awaitable(self.agent.reset_session())
             self._say_direct("Alles klar.")
             self.state = PipelineState.IDLE
             log.info("SESSION ENDED")
@@ -288,7 +305,7 @@ class VoicePipeline:
         if t in [stop, f"{stop}schoen", f"{stop}schön", f"vielen {stop}"]:
             self.state = PipelineState.IDLE
             self.agent.save_memory()   # fire-and-forget background save
-            self.agent.reset_session()
+            self._resolve_maybe_awaitable(self.agent.reset_session())
             log.info("SESSION ENDED")
             self._run_async(self._speak("Alles klar."))
             return
@@ -308,23 +325,24 @@ class VoicePipeline:
         """Speak text directly, with mic muted to avoid feedback.
 
         Uses the TTS engine's sync method if available, otherwise falls back
-        to macOS `say` command.
+        to macOS `say` command. Serialized via lock to prevent concurrent
+        TTS calls from clobbering the same audio file.
         """
-        self.stt.mute()
-        try:
-            if hasattr(self.tts, '_speak_sync'):
-                # Piper TTS has a sync method
-                self.tts._speak_sync(text)
-            else:
-                import subprocess
-                subprocess.run(
-                    ["say", "-r", str(self.config.tts.rate), text],
-                    timeout=10,
-                )
-        except Exception as e:
-            log.warning(f"Direct say failed: {e}")
-        finally:
-            self.stt.unmute()
+        with self._speech_lock:
+            self.stt.mute()
+            try:
+                if hasattr(self.tts, '_speak_sync'):
+                    self.tts._speak_sync(text)
+                else:
+                    import subprocess
+                    subprocess.run(
+                        ["say", "-r", str(self.config.tts.rate), text],
+                        timeout=10,
+                    )
+            except Exception as e:
+                log.warning(f"Direct say failed: {e}")
+            finally:
+                self.stt.unmute()
 
     def _process_command(self, text: str) -> None:
         """Send text to the agent and speak the response.
@@ -357,14 +375,21 @@ class VoicePipeline:
             return self._processing_done
 
         def _periodic_feedback() -> None:
-            """First announcement after 4s, then repeat every 20s."""
+            """First announcement after 4s, then repeat every 20s.
+
+            Skips speaking while a permission request is pending to avoid
+            interfering with the voice permission flow.
+            """
             if _wait_unless_done(4):
                 return
-            log.info("⏳ Jarvis denkt nach...")
-            self._say_direct("Moment, ich arbeite daran.")
+            if self.state != PipelineState.PERMISSION_PENDING:
+                log.info("⏳ Jarvis denkt nach...")
+                self._say_direct("Moment, ich arbeite daran.")
             while not self._processing_done:
                 if _wait_unless_done(20):
                     return
+                if self.state == PipelineState.PERMISSION_PENDING:
+                    continue  # Don't speak over permission dialog
                 elapsed = int(time.time() - start_time)
                 log.info(f"⏳ Jarvis arbeitet noch... ({elapsed}s)")
                 self._say_direct("Ich bin noch dran, bitte Geduld.")
@@ -381,7 +406,7 @@ class VoicePipeline:
 
         # Wire up progress callback
         self.agent._progress_callback = _on_tool_progress
-        response = self.agent.ask(text)
+        response = self._resolve_maybe_awaitable(self.agent.ask(text))
         self.agent._progress_callback = None
         self._processing_done = True
 

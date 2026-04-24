@@ -93,6 +93,8 @@ class JarvisAgent:
         # Signature: (tool_name: str, description: str) -> bool
         self.permission_handler: Callable[[str, str], bool] | None = None
 
+        self._save_future = None  # concurrent.futures.Future from save_memory()
+
         # Dedicated event loop — lives for the lifetime of this agent.
         self._loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(
@@ -343,6 +345,17 @@ class JarvisAgent:
                 log.warning(f"Memory save failed for {filename}: {e}")
 
     async def _reset_async(self) -> None:
+        # Wait for pending memory save before disconnecting
+        if self._save_future and not self._save_future.done():
+            log.info("Waiting for memory save to complete...")
+            try:
+                await asyncio.wait_for(
+                    asyncio.wrap_future(self._save_future), timeout=15
+                )
+            except (asyncio.TimeoutError, Exception) as e:
+                log.warning(f"Memory save interrupted: {e}")
+                self._save_future.cancel()
+            self._save_future = None
         self._session_active = False
         if self._client:
             await self._client.disconnect()
@@ -380,8 +393,10 @@ class JarvisAgent:
         return self._run(self._ask_async(text))
 
     def save_memory(self) -> None:
-        """Fire-and-forget: write updated memory files in background."""
-        asyncio.run_coroutine_threadsafe(self._save_memory_async(), self._loop)
+        """Start memory save in background. Awaited during reset_session."""
+        self._save_future = asyncio.run_coroutine_threadsafe(
+            self._save_memory_async(), self._loop
+        )
 
     def reset_session(self) -> None:
         """End the current session and reconnect for the next one."""
